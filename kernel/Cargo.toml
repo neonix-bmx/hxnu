@@ -1,0 +1,12 @@
+[package]
+name = "hxnu-kernel"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = []
+exception-test-breakpoint = []
+exception-test-page-fault = []
+exception-test-general-protection = []
+panic-self-test = []
