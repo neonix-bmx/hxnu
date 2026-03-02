@@ -75,6 +75,7 @@ Current bring-up logs also include:
 - HHDM and memory map summary
 - UEFI framebuffer or GOP handoff summary
 - output-only TTY console bootstrap with serial and framebuffer sinks
+- styled framebuffer console output for accent, success, warning, error, and fatal paths
 - frame allocator and heap bootstrap summary
 - GDT and IDT activation summary
 - local APIC capability and base-address probe
@@ -82,6 +83,7 @@ Current bring-up logs also include:
 - minimal ACPI discovery with `RSDP`, `XSDT`, `MADT`, and `FADT` summaries
 - periodic scheduler tick bootstrap summary
 - scheduler thread and runqueue model summary
+- bootstrap to idle context-switch summary
 - structured panic and fatal exception reports
 - controlled exception self-test output
 
@@ -93,6 +95,7 @@ The x86_64 bring-up currently supports controlled boot-time self-tests.
 - page fault
 - general protection fault
 - kernel panic
+- power reset
 
 Examples:
 
@@ -115,3 +118,10 @@ HXNU_CARGO_ARGS='--features exception-test-general-protection' ./scripts/build-i
 HXNU_CARGO_ARGS='--features panic-self-test' ./scripts/build-iso.sh
 ./scripts/run-qemu.sh
 ```
+
+```bash
+HXNU_CARGO_ARGS='--features power-reset-self-test' ./scripts/build-iso.sh
+./scripts/run-qemu.sh
+```
+
+`power-reset-self-test` currently reaches the FADT reset-register write path on the default `q35` + OVMF + TCG test setup. On this host, serial output stops immediately after the `0xcf9` reset write, so treat it as partial validation until it is cross-checked on another platform.

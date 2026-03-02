@@ -34,7 +34,10 @@ Current status:
 - MADT processor, IO APIC, and interrupt-override topology summaries are online on `x86_64`
 - FADT power and reset-register summaries are online on `x86_64`
 - Scheduler thread table and runqueue skeleton are online on `x86_64`
+- Bootstrap to idle-thread context switching is online on `x86_64`
+- Styled framebuffer console output is online on `x86_64`
 - Breakpoint, page fault, and general protection fault self-tests are working
+- Power-reset self-test reaches the FADT reset-register path on `x86_64`
 - Broader scheduler work remains next
 
 ## Phase 3

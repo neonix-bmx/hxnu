@@ -13,6 +13,7 @@ mod log;
 mod limine;
 mod mm;
 mod panic;
+mod power;
 mod sched;
 mod serial;
 mod time;
@@ -30,6 +31,7 @@ enum SelfTest {
     PageFault,
     GeneralProtectionFault,
     Panic,
+    PowerReset,
 }
 
 #[unsafe(no_mangle)]
@@ -66,22 +68,29 @@ pub extern "C" fn _start() -> ! {
         Some(framebuffer) => match fb::initialize(framebuffer) {
             Ok(summary) => {
                 let tty = tty::initialize(true);
-                kprintln!(
+                kprintln_style!(
+                    crate::tty::ConsoleStyle::Accent,
                     "HXNU: framebuffer online mode={}x{} pitch={} bpp={}",
                     summary.width,
                     summary.height,
                     summary.pitch,
                     summary.bpp,
                 );
-                kprintln!(
+                kprintln_style!(
+                    crate::tty::ConsoleStyle::Muted,
                     "HXNU: framebuffer probe background={:#010x} accent={:#010x}",
                     summary.sample_background,
                     summary.sample_accent,
                 );
                 if let Some(ink) = fb::console_probe() {
-                    kprintln!("HXNU: framebuffer console probe ink={:#010x}", ink);
+                    kprintln_style!(
+                        crate::tty::ConsoleStyle::Accent,
+                        "HXNU: framebuffer console probe ink={:#010x}",
+                        ink
+                    );
                 }
-                kprintln!(
+                kprintln_style!(
+                    crate::tty::ConsoleStyle::Success,
                     "HXNU: tty console online id={} outputs={} framebuffer={}",
                     tty.console_id,
                     tty.output_count,
@@ -90,7 +99,11 @@ pub extern "C" fn _start() -> ! {
             }
             Err(error) => {
                 let tty = tty::initialize(false);
-                kprintln!("HXNU: framebuffer offline reason={}", error.as_str());
+                kprintln_style!(
+                    crate::tty::ConsoleStyle::Error,
+                    "HXNU: framebuffer offline reason={}",
+                    error.as_str()
+                );
                 kprintln!(
                     "HXNU: tty console online id={} outputs={} framebuffer={}",
                     tty.console_id,
@@ -227,7 +240,8 @@ pub extern "C" fn _start() -> ! {
             kprintln!("HXNU: acpi rsdp response @ {:#010x}", rsdp_address);
             match acpi::discover(hhdm_offset, rsdp_address) {
                 Ok(discovery) => {
-                    kprintln!(
+                    kprintln_style!(
+                        crate::tty::ConsoleStyle::Accent,
                         "HXNU: acpi online revision={} oem={} rsdp={:#010x} root={} @ {:#010x}",
                         discovery.revision,
                         acpi::oem_id_str(&discovery.oem_id),
@@ -244,7 +258,8 @@ pub extern "C" fn _start() -> ! {
                         yes_no(discovery.fadt.is_some()),
                     );
                     if let Some(ref madt) = discovery.madt {
-                        kprintln!(
+                        kprintln_style!(
+                            crate::tty::ConsoleStyle::Accent,
                             "HXNU: acpi madt lapic={:#010x} flags={:#010x} cpus-enabled={}/{} ioapics={} iso={} x2apic-cpus={}",
                             madt.local_apic_address,
                             madt.flags,
@@ -282,6 +297,7 @@ pub extern "C" fn _start() -> ! {
                         }
                     }
                     if let Some(ref fadt) = discovery.fadt {
+                        power::configure(hhdm_offset, fadt);
                         kprintln!(
                             "HXNU: acpi fadt revision={} length={} profile={} sci={} smi-cmd={:#x}",
                             fadt.revision,
@@ -290,7 +306,8 @@ pub extern "C" fn _start() -> ! {
                             fadt.sci_interrupt,
                             fadt.smi_command_port,
                         );
-                        kprintln!(
+                        kprintln_style!(
+                            crate::tty::ConsoleStyle::Warning,
                             "HXNU: acpi power reset={} hw-reduced={} pm1a-ctl={:#x} pm1b-ctl={:#x}",
                             yes_no(fadt.reset_supported()),
                             yes_no(fadt.hardware_reduced()),
@@ -347,11 +364,33 @@ pub extern "C" fn _start() -> ! {
                 kprintln!("HXNU: running kernel self-test = panic");
                 panic!("requested kernel panic self-test");
             }
+            SelfTest::PowerReset => {
+                let capability = power::reset_capability();
+                kprintln!(
+                    "HXNU: running kernel self-test = power-reset supported={} space={} addr={:#x} value={:#04x}",
+                    yes_no(capability.supported),
+                    capability.address_space_str(),
+                    capability.address,
+                    capability.value,
+                );
+                match power::reboot() {
+                    Ok(()) => power::halt_forever(),
+                    Err(error) => {
+                        kprintln_style!(
+                            crate::tty::ConsoleStyle::Error,
+                            "HXNU: power reset self-test failed reason={}",
+                            error.as_str()
+                        );
+                        halt();
+                    }
+                }
+            }
         }
     }
 
     match sched::bootstrap(hhdm_offset, &cpu_info) {
-        Ok(state) => kprintln!(
+        Ok(state) => kprintln_style!(
+            crate::tty::ConsoleStyle::Success,
             "HXNU: scheduler bootstrap online source={} vector={:#04x} divide={} initial-count={} ticks={} threads={} runqueue={} current={}#{} role={} switches={} bootstrap-id={} idle-id={}",
             state.source,
             state.vector,
@@ -402,6 +441,8 @@ pub extern "C" fn _start() -> ! {
 const fn selected_self_test() -> Option<SelfTest> {
     if cfg!(feature = "panic-self-test") {
         Some(SelfTest::Panic)
+    } else if cfg!(feature = "power-reset-self-test") {
+        Some(SelfTest::PowerReset)
     } else if cfg!(feature = "exception-test-page-fault") {
         Some(SelfTest::PageFault)
     } else if cfg!(feature = "exception-test-general-protection") {

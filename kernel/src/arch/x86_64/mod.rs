@@ -1,4 +1,5 @@
 mod apic;
+mod context;
 mod cpu;
 mod early_map;
 mod gdt;
@@ -12,6 +13,7 @@ pub enum ExceptionSelfTest {
 }
 
 pub use apic::{PeriodicTimer, TimerBringUp, TimerError};
+pub use context::TaskContext;
 pub use cpu::CpuInfo;
 pub use early_map::MapError;
 
@@ -49,6 +51,18 @@ pub fn ensure_physical_region_mapped(
     extra_flags: u64,
 ) -> Result<u64, MapError> {
     early_map::ensure_region_mapped(hhdm_offset, physical_address, length, extra_flags)
+}
+
+pub fn initialize_kernel_thread_context(
+    context: &mut TaskContext,
+    stack: &'static mut [u8],
+    entry: extern "C" fn() -> !,
+) {
+    context::initialize_kernel_thread(context, stack, entry)
+}
+
+pub unsafe fn switch_context(current: &mut TaskContext, next: &TaskContext) -> ! {
+    unsafe { context::switch(current, next) }
 }
 
 pub fn mask_local_apic_timer() {

@@ -3,6 +3,8 @@ use core::cell::UnsafeCell;
 use crate::fb;
 use crate::serial;
 
+pub use crate::fb::ConsoleStyle;
+
 const OUTPUT_SERIAL: u8 = 1 << 0;
 const OUTPUT_FRAMEBUFFER: u8 = 1 << 1;
 
@@ -72,13 +74,20 @@ impl TtyConsole {
     }
 
     fn write_str(&mut self, text: &str) {
+        self.write_style(ConsoleStyle::Default, text);
+    }
+
+    fn write_style(&mut self, style: ConsoleStyle, text: &str) {
         let outputs = if self.initialized { self.outputs } else { OUTPUT_SERIAL };
 
         if outputs & OUTPUT_SERIAL != 0 {
             serial::write_str(text);
         }
         if outputs & OUTPUT_FRAMEBUFFER != 0 {
-            fb::write_str(text);
+            match style {
+                ConsoleStyle::Default => fb::write_str(text),
+                style => fb::write_style(style, text),
+            }
         }
 
         self.bytes_written = self.bytes_written.saturating_add(text.len() as u64);
@@ -105,6 +114,12 @@ pub fn initialize(framebuffer_output: bool) -> TtyBootstrap {
 pub fn write_str(text: &str) {
     unsafe {
         (*TTY_CONSOLE.get()).write_str(text);
+    }
+}
+
+pub fn write_style(style: ConsoleStyle, text: &str) {
+    unsafe {
+        (*TTY_CONSOLE.get()).write_style(style, text);
     }
 }
 

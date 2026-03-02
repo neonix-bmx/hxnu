@@ -52,6 +52,17 @@ impl FramebufferError {
     }
 }
 
+#[derive(Copy, Clone)]
+pub enum ConsoleStyle {
+    Default,
+    Accent,
+    Success,
+    Warning,
+    Error,
+    Fatal,
+    Muted,
+}
+
 struct GlobalFramebufferConsole(UnsafeCell<Option<FramebufferConsole>>);
 
 unsafe impl Sync for GlobalFramebufferConsole {}
@@ -101,9 +112,13 @@ pub fn initialize(framebuffer: limine::Framebuffer) -> Result<FramebufferSummary
 }
 
 pub fn write_str(text: &str) {
+    write_style(ConsoleStyle::Default, text);
+}
+
+pub fn write_style(style: ConsoleStyle, text: &str) {
     unsafe {
         if let Some(console) = &mut *FRAMEBUFFER_CONSOLE.get() {
-            console.write_str(text);
+            console.write_str(style, text);
         }
     }
 }
@@ -120,6 +135,11 @@ struct FramebufferConsole {
     accent: u32,
     accent_soft: u32,
     text: u32,
+    success: u32,
+    warning: u32,
+    error: u32,
+    fatal: u32,
+    muted: u32,
     log_origin_x: u64,
     log_origin_y: u64,
     log_width: u64,
@@ -140,6 +160,11 @@ impl FramebufferConsole {
             accent: 0,
             accent_soft: 0,
             text: 0,
+            success: 0,
+            warning: 0,
+            error: 0,
+            fatal: 0,
+            muted: 0,
             log_origin_x: LOG_ORIGIN_X,
             log_origin_y: LOG_ORIGIN_Y,
             log_width: framebuffer.width.saturating_sub(LOG_ORIGIN_X * 2),
@@ -167,6 +192,11 @@ impl FramebufferConsole {
         console.accent = console.pack_rgb(0x2d, 0xd4, 0xbf);
         console.accent_soft = console.pack_rgb(0x79, 0xe2, 0xd0);
         console.text = console.pack_rgb(0xf5, 0xf7, 0xfa);
+        console.success = console.pack_rgb(0x8b, 0xe9, 0x7d);
+        console.warning = console.pack_rgb(0xff, 0xc8, 0x57);
+        console.error = console.pack_rgb(0xff, 0x6b, 0x6b);
+        console.fatal = console.pack_rgb(0xff, 0x4d, 0x6d);
+        console.muted = console.pack_rgb(0x94, 0xa3, 0xb8);
 
         Ok(console)
     }
@@ -195,22 +225,22 @@ impl FramebufferConsole {
         self.clear_log_region();
     }
 
-    fn write_str(&mut self, text: &str) {
+    fn write_str(&mut self, style: ConsoleStyle, text: &str) {
         for byte in text.bytes() {
             match byte {
                 b'\r' => {}
                 b'\n' => self.new_line(),
                 b'\t' => {
                     for _ in 0..4 {
-                        self.write_byte(b' ');
+                        self.write_byte(style, b' ');
                     }
                 }
-                byte => self.write_byte(normalize_glyph_byte(byte)),
+                byte => self.write_byte(style, normalize_glyph_byte(byte)),
             }
         }
     }
 
-    fn write_byte(&mut self, byte: u8) {
+    fn write_byte(&mut self, style: ConsoleStyle, byte: u8) {
         if self.cursor_column >= self.columns {
             self.new_line();
         }
@@ -218,7 +248,13 @@ impl FramebufferConsole {
         let x = self.log_origin_x + self.cursor_column * CHAR_WIDTH;
         let y = self.log_origin_y + self.cursor_row * CHAR_HEIGHT;
         self.fill_rect(x, y, CHAR_WIDTH, CHAR_HEIGHT, self.background);
-        self.draw_glyph(x + FONT_SCALE, y + FONT_SCALE, byte, self.text, FONT_SCALE);
+        self.draw_glyph(
+            x + FONT_SCALE,
+            y + FONT_SCALE,
+            byte,
+            self.style_color(style),
+            FONT_SCALE,
+        );
         self.cursor_column += 1;
     }
 
@@ -277,6 +313,18 @@ impl FramebufferConsole {
             }
         }
         self.background
+    }
+
+    fn style_color(&self, style: ConsoleStyle) -> u32 {
+        match style {
+            ConsoleStyle::Default => self.text,
+            ConsoleStyle::Accent => self.accent,
+            ConsoleStyle::Success => self.success,
+            ConsoleStyle::Warning => self.warning,
+            ConsoleStyle::Error => self.error,
+            ConsoleStyle::Fatal => self.fatal,
+            ConsoleStyle::Muted => self.muted,
+        }
     }
 
     fn clear(&mut self, color: u32) {

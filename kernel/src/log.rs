@@ -8,24 +8,35 @@ use crate::tty;
 #[allow(dead_code)]
 pub fn write(args: fmt::Arguments<'_>) {
     let _interrupt_guard = InterruptGuard::new();
-    let mut writer = KernelWriter;
+    let mut writer = KernelWriter {
+        style: tty::ConsoleStyle::Default,
+    };
     let _ = writer.write_fmt(args);
 }
 
 pub fn write_record(args: fmt::Arguments<'_>) {
+    write_record_with_style(tty::ConsoleStyle::Default, args);
+}
+
+pub fn write_record_with_style(style: tty::ConsoleStyle, args: fmt::Arguments<'_>) {
     let _interrupt_guard = InterruptGuard::new();
-    let mut writer = KernelWriter;
+    let mut writer = KernelWriter { style };
     let timestamp = time::timestamp();
     let _ = write!(writer, "[{}.{:09}] ", timestamp.seconds, timestamp.nanoseconds);
     let _ = writer.write_fmt(args);
     let _ = writer.write_str("\n");
 }
 
-struct KernelWriter;
+struct KernelWriter {
+    style: tty::ConsoleStyle,
+}
 
 impl fmt::Write for KernelWriter {
     fn write_str(&mut self, text: &str) -> fmt::Result {
-        tty::write_str(text);
+        match self.style {
+            tty::ConsoleStyle::Default => tty::write_str(text),
+            style => tty::write_style(style, text),
+        }
         Ok(())
     }
 }
@@ -78,5 +89,12 @@ macro_rules! kprintln {
     });
     ($($arg:tt)*) => ({
         $crate::log::write_record(core::format_args!($($arg)*));
+    });
+}
+
+#[macro_export]
+macro_rules! kprintln_style {
+    ($style:expr, $($arg:tt)*) => ({
+        $crate::log::write_record_with_style($style, core::format_args!($($arg)*));
     });
 }

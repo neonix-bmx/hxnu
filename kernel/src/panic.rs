@@ -70,7 +70,7 @@ struct FatalWriter;
 
 impl fmt::Write for FatalWriter {
     fn write_str(&mut self, text: &str) -> fmt::Result {
-        tty::write_str(text);
+        tty::write_style(tty::ConsoleStyle::Fatal, text);
         Ok(())
     }
 }

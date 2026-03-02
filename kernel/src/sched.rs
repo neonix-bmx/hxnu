@@ -8,11 +8,13 @@ use crate::time;
 const BOOTSTRAP_TARGET_TICKS: u64 = 3;
 const BOOTSTRAP_TIMEOUT_NS: u64 = 500_000_000;
 const MAX_THREADS: usize = 8;
+const KERNEL_STACK_SIZE: usize = 16 * 1024;
 
 static BOOTSTRAP_ACTIVE: AtomicBool = AtomicBool::new(false);
 static SCHEDULER_READY: AtomicBool = AtomicBool::new(false);
 static SCHEDULER_TICKS: AtomicU64 = AtomicU64::new(0);
 static SCHEDULER: GlobalScheduler = GlobalScheduler::new();
+static IDLE_STACK: GlobalIdleStack = GlobalIdleStack::new();
 
 struct GlobalScheduler(UnsafeCell<Scheduler>);
 
@@ -25,6 +27,31 @@ impl GlobalScheduler {
 
     fn get(&self) -> *mut Scheduler {
         self.0.get()
+    }
+}
+
+struct GlobalIdleStack(UnsafeCell<AlignedStack>);
+
+unsafe impl Sync for GlobalIdleStack {}
+
+impl GlobalIdleStack {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(AlignedStack::new()))
+    }
+
+    fn get(&self) -> *mut AlignedStack {
+        self.0.get()
+    }
+}
+
+#[repr(align(16))]
+struct AlignedStack([u8; KERNEL_STACK_SIZE]);
+
+unsafe impl Sync for AlignedStack {}
+
+impl AlignedStack {
+    const fn new() -> Self {
+        Self([0; KERNEL_STACK_SIZE])
     }
 }
 
@@ -65,6 +92,7 @@ pub enum SchedulerError {
     Timeout,
     ThreadTableFull,
     RunQueueFull,
+    MissingIdleThread,
 }
 
 impl SchedulerError {
@@ -74,6 +102,7 @@ impl SchedulerError {
             Self::Timeout => "scheduler bootstrap timed out waiting for periodic timer ticks",
             Self::ThreadTableFull => "scheduler thread table is full",
             Self::RunQueueFull => "scheduler run queue is full",
+            Self::MissingIdleThread => "scheduler idle thread is missing",
         }
     }
 }
@@ -86,6 +115,7 @@ struct Thread {
     state: ThreadState,
     total_ticks: u64,
     dispatch_count: u64,
+    context: arch::x86_64::TaskContext,
 }
 
 impl Thread {
@@ -97,6 +127,7 @@ impl Thread {
             state: ThreadState::Unused,
             total_ticks: 0,
             dispatch_count: 0,
+            context: arch::x86_64::TaskContext::empty(),
         }
     }
 }
@@ -180,6 +211,13 @@ impl Scheduler {
         self.threads[bootstrap_slot].dispatch_count = 1;
         self.threads[idle_slot].state = ThreadState::Runnable;
 
+        let idle_stack = unsafe { &mut (*IDLE_STACK.get()).0 };
+        arch::x86_64::initialize_kernel_thread_context(
+            &mut self.threads[idle_slot].context,
+            idle_stack,
+            idle_thread_entry,
+        );
+
         self.current_runqueue_index = 0;
         self.initialized = true;
         self.bootstrap_thread_id = self.threads[bootstrap_slot].id;
@@ -207,6 +245,7 @@ impl Scheduler {
             state: ThreadState::Runnable,
             total_ticks: 0,
             dispatch_count: 0,
+            context: arch::x86_64::TaskContext::empty(),
         };
         self.thread_count += 1;
         Ok(slot)
@@ -228,7 +267,9 @@ impl Scheduler {
         }
 
         let current_slot = self.runqueue[self.current_runqueue_index];
-        self.threads[current_slot].total_ticks = self.threads[current_slot].total_ticks.saturating_add(1);
+        self.threads[current_slot].total_ticks = self.threads[current_slot]
+            .total_ticks
+            .saturating_add(1);
 
         if self.runqueue_depth == 1 {
             return Some(self.dispatch_snapshot(current_slot));
@@ -238,7 +279,9 @@ impl Scheduler {
         self.current_runqueue_index = (self.current_runqueue_index + 1) % self.runqueue_depth;
         let next_slot = self.runqueue[self.current_runqueue_index];
         self.threads[next_slot].state = ThreadState::Running;
-        self.threads[next_slot].dispatch_count = self.threads[next_slot].dispatch_count.saturating_add(1);
+        self.threads[next_slot].dispatch_count = self.threads[next_slot]
+            .dispatch_count
+            .saturating_add(1);
         self.context_switches = self.context_switches.saturating_add(1);
 
         Some(self.dispatch_snapshot(next_slot))
@@ -262,15 +305,15 @@ impl Scheduler {
         self.threads[self.runqueue[self.current_runqueue_index]]
     }
 
-    fn activate_idle_thread(&mut self) {
+    fn activate_idle_thread(&mut self) -> Result<(), SchedulerError> {
         if !self.initialized || self.runqueue_depth == 0 || self.idle_thread_id == 0 {
-            return;
+            return Err(SchedulerError::MissingIdleThread);
         }
 
         let current_slot = self.runqueue[self.current_runqueue_index];
         if self.threads[current_slot].id == self.idle_thread_id {
             self.threads[current_slot].state = ThreadState::Running;
-            return;
+            return Ok(());
         }
 
         self.threads[current_slot].state = ThreadState::Runnable;
@@ -279,8 +322,44 @@ impl Scheduler {
             if self.threads[slot].id == self.idle_thread_id {
                 self.current_runqueue_index = index;
                 self.threads[slot].state = ThreadState::Running;
-                break;
+                self.context_switches = self.context_switches.saturating_add(1);
+                return Ok(());
             }
+        }
+
+        Err(SchedulerError::MissingIdleThread)
+    }
+
+    fn idle_context_pair(
+        &mut self,
+    ) -> Result<(&mut arch::x86_64::TaskContext, &arch::x86_64::TaskContext), SchedulerError> {
+        self.activate_idle_thread()?;
+
+        let mut bootstrap_slot = None;
+        let mut idle_slot = None;
+        for slot in 0..self.thread_count {
+            match self.threads[slot].role {
+                ThreadRole::Bootstrap => bootstrap_slot = Some(slot),
+                ThreadRole::Idle => idle_slot = Some(slot),
+                ThreadRole::None => {}
+            }
+        }
+
+        let bootstrap_slot = bootstrap_slot.ok_or(SchedulerError::MissingIdleThread)?;
+        let idle_slot = idle_slot.ok_or(SchedulerError::MissingIdleThread)?;
+        if bootstrap_slot == idle_slot {
+            return Err(SchedulerError::MissingIdleThread);
+        }
+
+        let (left, right) = self.threads.split_at_mut(idle_slot.max(bootstrap_slot));
+        if bootstrap_slot < idle_slot {
+            let current = &mut left[bootstrap_slot].context;
+            let next = &right[0].context;
+            Ok((current, next))
+        } else {
+            let next = &left[idle_slot].context;
+            let current = &mut right[0].context;
+            Ok((current, next))
         }
     }
 
@@ -390,9 +469,12 @@ pub fn stats() -> SchedulerStats {
 }
 
 pub fn idle_loop() -> ! {
-    unsafe {
-        (*SCHEDULER.get()).activate_idle_thread();
-    }
+    let (current, next) = unsafe { (*SCHEDULER.get()).idle_context_pair() }
+        .unwrap_or_else(|error| panic!("scheduler idle switch failed: {}", error.as_str()));
+    unsafe { arch::x86_64::switch_context(current, next) }
+}
+
+extern "C" fn idle_thread_entry() -> ! {
     let stats = stats();
     kprintln!(
         "HXNU: scheduler idle loop entered current={} role={} id={}",
