@@ -79,6 +79,8 @@ The filesystem stack should stay split by responsibility:
 
 This keeps the boot path practical without forcing every filesystem implementation into the kernel image.
 
+Before the full VFS arrives, `procfs` can start as a read-only kernel snapshot interface that generates pseudo-files directly from live kernel state. That gives early introspection without forcing a premature inode or mount implementation.
+
 ## SMP And Topology Direction
 
 Multiprocessor support should arrive in layers:

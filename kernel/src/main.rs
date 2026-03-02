@@ -14,6 +14,7 @@ mod limine;
 mod mm;
 mod panic;
 mod power;
+mod procfs;
 mod sched;
 mod serial;
 mod smp;
@@ -434,6 +435,24 @@ pub extern "C" fn _start() -> ! {
         None => kprintln!("HXNU: acpi rsdp response missing"),
     }
 
+    match procfs::initialize(&cpu_info) {
+        Ok(summary) => kprintln_style!(
+            crate::tty::ConsoleStyle::Success,
+            "HXNU: procfs online directories={} files={} entries={}",
+            summary.directory_count,
+            summary.file_count,
+            summary.entry_count,
+        ),
+        Err(error) => {
+            kprintln_style!(
+                crate::tty::ConsoleStyle::Error,
+                "HXNU: procfs offline reason={}",
+                error.as_str()
+            );
+            halt();
+        }
+    }
+
     if let Some(test) = SELF_TEST {
         match test {
             SelfTest::Breakpoint => {
@@ -528,6 +547,27 @@ pub extern "C" fn _start() -> ! {
         scheduler_stats.bootstrap_thread_id,
         scheduler_stats.idle_thread_id,
     );
+    if let Some(version) = procfs::preview("/proc/version", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: procfs preview version={}",
+            version,
+        );
+    }
+    if let Some(uptime) = procfs::preview("/proc/uptime", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: procfs preview uptime={}",
+            uptime,
+        );
+    }
+    if let Some(schedstat) = procfs::preview("/proc/schedstat", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: procfs preview schedstat={}",
+            schedstat,
+        );
+    }
 
     kprintln!("HXNU: Rust kernel skeleton online");
     sched::idle_loop()
