@@ -1,5 +1,7 @@
-use core::arch::x86_64::{__cpuid, __cpuid_count, _rdtsc};
+use core::arch::x86_64::_rdtsc;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
+
+use crate::arch;
 
 const DEFAULT_TSC_HZ: u64 = 1_000_000_000;
 
@@ -74,10 +76,10 @@ pub fn uptime_nanoseconds() -> u64 {
 }
 
 fn detect_tsc_frequency() -> Option<(u64, ClockSource)> {
-    let max_basic_leaf = __cpuid(0).eax;
+    let max_basic_leaf = arch::x86_64::max_basic_cpuid_leaf();
 
     if max_basic_leaf >= 0x15 {
-        let leaf_15 = __cpuid_count(0x15, 0);
+        let leaf_15 = arch::x86_64::cpuid_count(0x15, 0);
         if leaf_15.eax != 0 && leaf_15.ebx != 0 && leaf_15.ecx != 0 {
             let numerator = (leaf_15.ecx as u128) * (leaf_15.ebx as u128);
             let denominator = leaf_15.eax as u128;
@@ -89,7 +91,7 @@ fn detect_tsc_frequency() -> Option<(u64, ClockSource)> {
     }
 
     if max_basic_leaf >= 0x16 {
-        let leaf_16 = __cpuid(0x16);
+        let leaf_16 = arch::x86_64::cpuid(0x16);
         if leaf_16.eax != 0 {
             let hz = (leaf_16.eax as u64).saturating_mul(1_000_000);
             if hz != 0 {

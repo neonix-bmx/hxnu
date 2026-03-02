@@ -1,9 +1,12 @@
 mod apic;
 mod context;
+mod cpuid;
 mod cpu;
 mod early_map;
 mod gdt;
 mod interrupts;
+
+use core::arch::x86_64::CpuidResult;
 
 #[derive(Copy, Clone)]
 pub enum ExceptionSelfTest {
@@ -28,6 +31,18 @@ pub fn segment_selectors() -> gdt::SegmentSelectors {
 
 pub fn probe_cpu() -> cpu::CpuInfo {
     cpu::probe()
+}
+
+pub fn cpuid(leaf: u32) -> CpuidResult {
+    cpuid::query(leaf)
+}
+
+pub fn cpuid_count(leaf: u32, subleaf: u32) -> CpuidResult {
+    cpuid::query_count(leaf, subleaf)
+}
+
+pub fn max_basic_cpuid_leaf() -> u32 {
+    cpuid::max_basic_leaf()
 }
 
 pub fn initialize_local_apic_timer(

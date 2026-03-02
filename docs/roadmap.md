@@ -26,6 +26,7 @@ Release target:
 
 Current status:
 - GDT/IDT activation is online on `x86_64`
+- CPUID inventory is online on `x86_64`
 - UEFI framebuffer or GOP handoff is online on `x86_64`
 - Output-only TTY console bootstrap is online on `x86_64`
 - Local APIC timer one-shot bring-up is online on `x86_64`

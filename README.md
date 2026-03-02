@@ -78,6 +78,7 @@ Current bring-up logs also include:
 - styled framebuffer console output for accent, success, warning, error, and fatal paths
 - frame allocator and heap bootstrap summary
 - GDT and IDT activation summary
+- CPUID vendor, brand, leaf, and feature summary
 - local APIC capability and base-address probe
 - local APIC timer one-shot self-test summary
 - minimal ACPI discovery with `RSDP`, `XSDT`, `MADT`, and `FADT` summaries

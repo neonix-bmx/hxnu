@@ -211,12 +211,30 @@ pub extern "C" fn _start() -> ! {
     );
     let cpu_info = arch::x86_64::probe_cpu();
     kprintln!(
-        "HXNU: cpu local-apic={} x2apic={} tsc-deadline={} initial-apic-id={}",
+        "HXNU: cpu local-apic={} x2apic={} tsc-deadline={} invariant-tsc={} nx={} hypervisor={} initial-apic-id={}",
         yes_no(cpu_info.local_apic_supported),
         yes_no(cpu_info.x2apic_supported),
         yes_no(cpu_info.tsc_deadline_supported),
+        yes_no(cpu_info.invariant_tsc_supported),
+        yes_no(cpu_info.nx_supported),
+        yes_no(cpu_info.hypervisor_present),
         cpu_info.initial_apic_id,
     );
+    kprintln_style!(
+        crate::tty::ConsoleStyle::Muted,
+        "HXNU: cpuid vendor={} vendor-id={} max-basic={:#x} max-extended={:#x}",
+        cpu_info.vendor.as_str(),
+        cpu_info.vendor_str(),
+        cpu_info.max_basic_leaf,
+        cpu_info.max_extended_leaf,
+    );
+    if let Some(brand) = cpu_info.brand_str() {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: cpuid brand {}",
+            brand,
+        );
+    }
     if cpu_info.local_apic_supported {
         kprintln!(
             "HXNU: apic base={:#010x} enabled={} x2apic-mode={} bsp={}",
