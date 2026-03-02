@@ -87,6 +87,7 @@ Current bring-up logs also include:
 - SMP topology inventory and AP bring-up target summary from `MADT`
 - read-only `procfs` snapshot bootstrap
 - read-only `devfs` namespace bootstrap
+- minimal VFS mount and read facade for `/`, `/dev`, and `/proc`
 - periodic scheduler tick bootstrap summary
 - scheduler thread and runqueue model summary
 - bootstrap to idle context-switch summary

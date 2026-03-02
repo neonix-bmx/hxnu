@@ -97,19 +97,6 @@ pub fn read(path: &str) -> Option<String> {
     }
 }
 
-pub fn preview(path: &str, max_len: usize) -> Option<String> {
-    let content = read(path)?;
-    let line = content.lines().next()?.trim();
-    if line.len() <= max_len {
-        return Some(String::from(line));
-    }
-
-    let mut preview = String::new();
-    preview.push_str(&line[..max_len]);
-    preview.push_str("...");
-    Some(preview)
-}
-
 fn render_root() -> String {
     let mut text = String::new();
     for node in DEVFS_NODES {

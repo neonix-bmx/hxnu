@@ -21,6 +21,7 @@ mod serial;
 mod smp;
 mod time;
 mod tty;
+mod vfs;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -479,6 +480,23 @@ pub extern "C" fn _start() -> ! {
             halt();
         }
     }
+    match vfs::initialize() {
+        Ok(summary) => kprintln_style!(
+            crate::tty::ConsoleStyle::Success,
+            "HXNU: vfs online mounts={} root-entries={} directories={}",
+            summary.mount_count,
+            summary.root_entry_count,
+            summary.directory_count,
+        ),
+        Err(error) => {
+            kprintln_style!(
+                crate::tty::ConsoleStyle::Error,
+                "HXNU: vfs offline reason={}",
+                error.as_str()
+            );
+            halt();
+        }
+    }
     for console_id in 1..tty::VIRTUAL_CONSOLE_COUNT as u32 {
         let _ = tty::write_to_console(
             console_id,
@@ -608,35 +626,42 @@ pub extern "C" fn _start() -> ! {
         scheduler_stats.bootstrap_thread_id,
         scheduler_stats.idle_thread_id,
     );
-    if let Some(version) = procfs::preview("/proc/version", 80) {
+    if let Some(root) = vfs::preview("/", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: vfs preview root={}",
+            root,
+        );
+    }
+    if let Some(version) = vfs::preview("/proc/version", 80) {
         kprintln_style!(
             crate::tty::ConsoleStyle::Muted,
             "HXNU: procfs preview version={}",
             version,
         );
     }
-    if let Some(uptime) = procfs::preview("/proc/uptime", 80) {
+    if let Some(uptime) = vfs::preview("/proc/uptime", 80) {
         kprintln_style!(
             crate::tty::ConsoleStyle::Muted,
             "HXNU: procfs preview uptime={}",
             uptime,
         );
     }
-    if let Some(schedstat) = procfs::preview("/proc/schedstat", 80) {
+    if let Some(schedstat) = vfs::preview("/proc/schedstat", 80) {
         kprintln_style!(
             crate::tty::ConsoleStyle::Muted,
             "HXNU: procfs preview schedstat={}",
             schedstat,
         );
     }
-    if let Some(devlist) = devfs::preview("/dev", 80) {
+    if let Some(devlist) = vfs::preview("/dev", 80) {
         kprintln_style!(
             crate::tty::ConsoleStyle::Muted,
             "HXNU: devfs preview root={}",
             devlist,
         );
     }
-    if let Some(console) = devfs::preview("/dev/console", 80) {
+    if let Some(console) = vfs::preview("/dev/console", 80) {
         kprintln_style!(
             crate::tty::ConsoleStyle::Muted,
             "HXNU: devfs preview console={}",

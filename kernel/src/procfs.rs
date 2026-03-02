@@ -83,6 +83,7 @@ pub fn summary() -> ProcfsSummary {
 pub fn read(path: &str) -> Option<String> {
     let state = unsafe { (&*PROCFS.get()).as_ref()? };
     match path {
+        "/proc" => Some(render_root()),
         "/proc/version" => Some(render_version()),
         "/proc/uptime" => Some(render_uptime()),
         "/proc/meminfo" => Some(render_meminfo()),
@@ -93,17 +94,12 @@ pub fn read(path: &str) -> Option<String> {
     }
 }
 
-pub fn preview(path: &str, max_len: usize) -> Option<String> {
-    let content = read(path)?;
-    let line = content.lines().next()?.trim();
-    if line.len() <= max_len {
-        return Some(String::from(line));
+fn render_root() -> String {
+    let mut text = String::new();
+    for file in PROCFS_FILES {
+        let _ = writeln!(text, "{}", file.trim_start_matches("/proc/"));
     }
-
-    let mut preview = String::new();
-    preview.push_str(&line[..max_len]);
-    preview.push_str("...");
-    Some(preview)
+    text
 }
 
 fn render_version() -> String {
