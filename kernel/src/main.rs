@@ -7,6 +7,7 @@ extern crate alloc;
 
 mod acpi;
 mod arch;
+mod devfs;
 mod fb;
 #[macro_use]
 mod log;
@@ -452,6 +453,23 @@ pub extern "C" fn _start() -> ! {
             halt();
         }
     }
+    match devfs::initialize() {
+        Ok(summary) => kprintln_style!(
+            crate::tty::ConsoleStyle::Success,
+            "HXNU: devfs online directories={} nodes={} entries={}",
+            summary.directory_count,
+            summary.node_count,
+            summary.entry_count,
+        ),
+        Err(error) => {
+            kprintln_style!(
+                crate::tty::ConsoleStyle::Error,
+                "HXNU: devfs offline reason={}",
+                error.as_str()
+            );
+            halt();
+        }
+    }
 
     if let Some(test) = SELF_TEST {
         match test {
@@ -566,6 +584,20 @@ pub extern "C" fn _start() -> ! {
             crate::tty::ConsoleStyle::Muted,
             "HXNU: procfs preview schedstat={}",
             schedstat,
+        );
+    }
+    if let Some(devlist) = devfs::preview("/dev", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: devfs preview root={}",
+            devlist,
+        );
+    }
+    if let Some(console) = devfs::preview("/dev/console", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: devfs preview console={}",
+            console,
         );
     }
 

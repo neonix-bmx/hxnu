@@ -81,6 +81,8 @@ This keeps the boot path practical without forcing every filesystem implementati
 
 Before the full VFS arrives, `procfs` can start as a read-only kernel snapshot interface that generates pseudo-files directly from live kernel state. That gives early introspection without forcing a premature inode or mount implementation.
 
+`devfs` can start the same way: a read-only device namespace with well-known nodes such as `console`, `tty0`, `null`, `zero`, and `kmsg`, backed by kernel-owned metadata until the full device model and VFS mount path are ready.
+
 ## SMP And Topology Direction
 
 Multiprocessor support should arrive in layers:

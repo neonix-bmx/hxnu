@@ -85,6 +85,7 @@ Current bring-up logs also include:
 - minimal ACPI discovery with `RSDP`, `XSDT`, `MADT`, and `FADT` summaries
 - SMP topology inventory and AP bring-up target summary from `MADT`
 - read-only `procfs` snapshot bootstrap
+- read-only `devfs` namespace bootstrap
 - periodic scheduler tick bootstrap summary
 - scheduler thread and runqueue model summary
 - bootstrap to idle context-switch summary
