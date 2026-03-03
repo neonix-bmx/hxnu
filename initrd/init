@@ -1,0 +1,3 @@
+#!/bin/sh
+echo "HXNU 2605 early init placeholder"
+echo "userspace handoff is not wired yet"

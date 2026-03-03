@@ -3,9 +3,8 @@ use core::cell::UnsafeCell;
 use core::fmt::Write;
 
 use crate::devfs;
+use crate::initrd;
 use crate::procfs;
-
-const ROOT_DIRECTORIES: [&str; 3] = ["/", "/dev", "/proc"];
 
 struct GlobalVfs(UnsafeCell<Option<VfsState>>);
 
@@ -25,7 +24,7 @@ static VFS: GlobalVfs = GlobalVfs::new();
 
 #[derive(Copy, Clone)]
 struct VfsState {
-    mount_count: usize,
+    initialized: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -54,16 +53,17 @@ pub fn initialize() -> Result<VfsSummary, VfsError> {
         return Err(VfsError::AlreadyInitialized);
     }
 
-    *slot = Some(VfsState { mount_count: 2 });
+    *slot = Some(VfsState { initialized: true });
     Ok(summary())
 }
 
 pub fn summary() -> VfsSummary {
-    let mount_count = unsafe { (&*VFS.get()).as_ref().map_or(0, |state| state.mount_count) };
+    let initialized = unsafe { (&*VFS.get()).as_ref().is_some_and(|state| state.initialized) };
+    let mount_count = if initialized { 2 + usize::from(initrd::is_initialized()) } else { 0 };
     VfsSummary {
         mount_count,
         root_entry_count: mount_count,
-        directory_count: ROOT_DIRECTORIES.len(),
+        directory_count: 3 + usize::from(initrd::is_initialized()),
     }
 }
 
@@ -72,8 +72,10 @@ pub fn read(path: &str) -> Option<String> {
     match path {
         "/" => Some(render_root()),
         "/dev" | "/dev/" => devfs::read("/dev"),
+        "/initrd" | "/initrd/" => initrd::read("/initrd"),
         "/proc" | "/proc/" => procfs::read("/proc"),
         _ if path.starts_with("/dev/") => devfs::read(path),
+        _ if path.starts_with("/initrd/") => initrd::read(path),
         _ if path.starts_with("/proc/") => procfs::read(path),
         _ => None,
     }
@@ -113,6 +115,9 @@ pub fn preview(path: &str, max_len: usize) -> Option<String> {
 fn render_root() -> String {
     let mut text = String::new();
     let _ = writeln!(text, "dev");
+    if initrd::is_initialized() {
+        let _ = writeln!(text, "initrd");
+    }
     let _ = writeln!(text, "proc");
     text
 }

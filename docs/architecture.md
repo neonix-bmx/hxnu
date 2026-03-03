@@ -83,7 +83,14 @@ Before the full VFS arrives, `procfs` can start as a read-only kernel snapshot i
 
 `devfs` can start the same way: a read-only device namespace with well-known nodes such as `console`, `tty0`, `null`, `zero`, and `kmsg`, backed by kernel-owned metadata until the full device model and VFS mount path are ready.
 
-The first VFS milestone should be a minimal mount and read facade over `/`, `/dev`, and `/proc`. That keeps path resolution and early `initrd` work moving without pretending the project already has a complete inode, dentry, or permission model.
+The first VFS milestone should be a minimal mount and read facade over `/`, `/dev`, `/proc`, and then `/initrd`. That keeps path resolution and early `initrd` work moving without pretending the project already has a complete inode, dentry, or permission model.
+
+The first initrd milestone should stay narrow:
+
+- `cpio` `newc` parsing
+- bootloader module discovery
+- read-only archive browsing through `/initrd`
+- no executable loading assumptions yet
 
 ## SMP And Topology Direction
 

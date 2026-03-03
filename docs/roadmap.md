@@ -39,6 +39,7 @@ Current status:
 - Read-only `procfs` snapshot bootstrap is online on `x86_64`
 - Read-only `devfs` namespace bootstrap is online on `x86_64`
 - Minimal VFS mount and read facade is online on `x86_64`
+- `cpio` `newc` initrd discovery and `/initrd` read path are online on `x86_64`
 - Multiple virtual TTY screen foundation is online on `x86_64`
 - Scheduler thread table and runqueue skeleton are online on `x86_64`
 - Bootstrap to idle-thread context switching is online on `x86_64`

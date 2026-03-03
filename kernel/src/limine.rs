@@ -1,3 +1,4 @@
+use core::ffi::CStr;
 use core::ptr;
 
 #[repr(C)]
@@ -85,6 +86,40 @@ pub struct LimineFramebufferRequest {
 }
 
 #[repr(C)]
+pub struct LimineFile {
+    pub revision: u64,
+    pub address: *const u8,
+    pub size: u64,
+    pub path: *const i8,
+    pub string: *const i8,
+    pub media_type: u32,
+    pub unused: u32,
+    pub tftp_ip: u32,
+    pub tftp_port: u32,
+    pub partition_index: u32,
+    pub mbr_disk_id: u32,
+    pub gpt_disk_uuid: [u8; 16],
+    pub gpt_part_uuid: [u8; 16],
+    pub part_uuid: [u8; 16],
+}
+
+#[repr(C)]
+pub struct LimineModuleResponse {
+    pub revision: u64,
+    pub module_count: u64,
+    pub modules: *const *const LimineFile,
+}
+
+#[repr(C)]
+pub struct LimineModuleRequest {
+    pub id: [u64; 4],
+    pub revision: u64,
+    pub response: *const LimineModuleResponse,
+    pub internal_module_count: u64,
+    pub internal_modules: *const *const u8,
+}
+
+#[repr(C)]
 pub struct LimineRsdpResponse {
     pub revision: u64,
     pub address: u64,
@@ -149,9 +184,32 @@ pub struct Framebuffer {
     pub blue_mask_shift: u8,
 }
 
+#[derive(Copy, Clone)]
+pub struct Module {
+    file: *const LimineFile,
+}
+
 impl MemoryMapEntry {
     pub fn is_usable(self) -> bool {
         self.entry_type == MemoryMapEntryType::Usable
+    }
+}
+
+impl Module {
+    pub fn size(&self) -> usize {
+        unsafe { (*self.file).size as usize }
+    }
+
+    pub fn bytes(&self) -> &'static [u8] {
+        unsafe { core::slice::from_raw_parts((*self.file).address, self.size()) }
+    }
+
+    pub fn path(&self) -> Option<&'static str> {
+        c_str(unsafe { (*self.file).path })
+    }
+
+    pub fn string(&self) -> Option<&'static str> {
+        c_str(unsafe { (*self.file).string })
     }
 }
 
@@ -159,8 +217,18 @@ pub struct MemoryMap {
     response: *const LimineMemmapResponse,
 }
 
+pub struct ModuleList {
+    response: *const LimineModuleResponse,
+}
+
 pub struct MemoryMapIter {
     entries: *const *const LimineMemmapEntry,
+    index: usize,
+    len: usize,
+}
+
+pub struct ModuleIter {
+    modules: *const *const LimineFile,
     index: usize,
     len: usize,
 }
@@ -185,6 +253,26 @@ impl MemoryMap {
     }
 }
 
+impl ModuleList {
+    pub fn len(&self) -> usize {
+        unsafe { (*self.response).module_count as usize }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn iter(&self) -> ModuleIter {
+        unsafe {
+            ModuleIter {
+                modules: (*self.response).modules,
+                index: 0,
+                len: (*self.response).module_count as usize,
+            }
+        }
+    }
+}
+
 impl Iterator for MemoryMapIter {
     type Item = MemoryMapEntry;
 
@@ -203,6 +291,27 @@ impl Iterator for MemoryMapIter {
                 length: entry.length,
                 entry_type: MemoryMapEntryType::from_raw(entry.entry_type),
             })
+        }
+    }
+}
+
+impl Iterator for ModuleIter {
+    type Item = Module;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.len {
+            return None;
+        }
+
+        unsafe {
+            let slot = self.modules.add(self.index);
+            self.index += 1;
+            let file = *slot;
+            if file.is_null() {
+                return None;
+            }
+
+            Some(Module { file })
         }
     }
 }
@@ -252,6 +361,21 @@ static mut FRAMEBUFFER_REQUEST: LimineFramebufferRequest = LimineFramebufferRequ
     ],
     revision: 0,
     response: core::ptr::null(),
+};
+
+#[used]
+#[unsafe(link_section = ".limine_requests")]
+static mut MODULE_REQUEST: LimineModuleRequest = LimineModuleRequest {
+    id: [
+        0xc7b1_dd30_df4c_8b88,
+        0x0a82_e883_a194_f07b,
+        0x3e7e_2797_02be_32af,
+        0xca1c_4f3b_d128_0cee,
+    ],
+    revision: 0,
+    response: core::ptr::null(),
+    internal_module_count: 0,
+    internal_modules: core::ptr::null(),
 };
 
 #[used]
@@ -339,6 +463,16 @@ pub fn framebuffer() -> Option<Framebuffer> {
     }
 }
 
+pub fn modules() -> Option<ModuleList> {
+    let request = ptr::addr_of!(MODULE_REQUEST);
+    let response = unsafe { (*request).response };
+    if response.is_null() {
+        None
+    } else {
+        Some(ModuleList { response })
+    }
+}
+
 pub fn rsdp_address() -> Option<u64> {
     let request = ptr::addr_of!(RSDP_REQUEST);
     let response = unsafe { (*request).response };
@@ -347,4 +481,12 @@ pub fn rsdp_address() -> Option<u64> {
     } else {
         Some(unsafe { (*response).address })
     }
+}
+
+fn c_str(ptr: *const i8) -> Option<&'static str> {
+    if ptr.is_null() {
+        return None;
+    }
+
+    unsafe { CStr::from_ptr(ptr).to_str().ok() }
 }

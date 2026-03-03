@@ -9,6 +9,7 @@ ISO_PATH="${ROOT}/build/hxnu.iso"
 KERNEL_PATH="${ROOT}/target/x86_64-unknown-none/release/hxnu-kernel"
 
 "${ROOT}/scripts/prepare-limine.sh"
+"${ROOT}/scripts/build-initrd.sh"
 if [ -n "${HXNU_CARGO_ARGS:-}" ]; then
     cargo build --release -p hxnu-kernel ${HXNU_CARGO_ARGS}
 else
@@ -19,6 +20,7 @@ rm -rf "${ISO_ROOT}"
 mkdir -p "${ISO_ROOT}/boot/limine"
 mkdir -p "${ISO_ROOT}/EFI/BOOT"
 cp "${KERNEL_PATH}" "${ISO_ROOT}/boot/kernel"
+cp "${ROOT}/build/initrd.cpio" "${ISO_ROOT}/boot/initrd.cpio"
 cp "${ROOT}/boot/limine.conf" "${ISO_ROOT}/limine.conf"
 cp "${ROOT}/boot/limine.conf" "${ISO_ROOT}/boot/limine/limine.conf"
 cp "${LIMINE_DIR}/limine-bios.sys" "${ISO_ROOT}/limine-bios.sys"

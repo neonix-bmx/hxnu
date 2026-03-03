@@ -9,6 +9,7 @@ mod acpi;
 mod arch;
 mod devfs;
 mod fb;
+mod initrd;
 #[macro_use]
 mod log;
 mod limine;
@@ -480,6 +481,24 @@ pub extern "C" fn _start() -> ! {
             halt();
         }
     }
+    match initrd::initialize() {
+        Ok(summary) => kprintln_style!(
+            crate::tty::ConsoleStyle::Success,
+            "HXNU: initrd online modules={} directories={} files={} entries={} bytes={} path={} label={}",
+            summary.module_count,
+            summary.directory_count,
+            summary.file_count,
+            summary.entry_count,
+            summary.archive_bytes,
+            initrd::module_path().unwrap_or("<unknown>"),
+            initrd::module_label().unwrap_or("<none>"),
+        ),
+        Err(error) => kprintln_style!(
+            crate::tty::ConsoleStyle::Warning,
+            "HXNU: initrd offline reason={}",
+            error.as_str()
+        ),
+    }
     match vfs::initialize() {
         Ok(summary) => kprintln_style!(
             crate::tty::ConsoleStyle::Success,
@@ -659,6 +678,20 @@ pub extern "C" fn _start() -> ! {
             crate::tty::ConsoleStyle::Muted,
             "HXNU: devfs preview root={}",
             devlist,
+        );
+    }
+    if let Some(initrd_root) = vfs::preview("/initrd", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: initrd preview root={}",
+            initrd_root,
+        );
+    }
+    if let Some(init) = vfs::preview("/initrd/init", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: initrd preview init={}",
+            init,
         );
     }
     if let Some(console) = vfs::preview("/dev/console", 80) {

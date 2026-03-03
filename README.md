@@ -53,6 +53,8 @@ Current builds use Rust's built-in `x86_64-unknown-none` target with a custom li
 
 `prepare-limine.sh` first tries to reuse a local `../heartix/target/limine-9.2.0` tree during bootstrap. If that does not exist, it downloads the pinned Limine binary archive for `9.2.0` and stages the required artifacts under `vendor/`.
 
+`build-initrd.sh` generates a small `cpio` `newc` archive from `initrd/` and places it at `/boot/initrd.cpio` in the ISO. Limine exposes it to the kernel as the `initrd` boot module.
+
 ## Run Under QEMU
 
 ```bash
@@ -87,7 +89,8 @@ Current bring-up logs also include:
 - SMP topology inventory and AP bring-up target summary from `MADT`
 - read-only `procfs` snapshot bootstrap
 - read-only `devfs` namespace bootstrap
-- minimal VFS mount and read facade for `/`, `/dev`, and `/proc`
+- minimal VFS mount and read facade for `/`, `/dev`, `/proc`, and `/initrd`
+- `cpio` `newc` initrd module discovery and `/initrd` read path
 - periodic scheduler tick bootstrap summary
 - scheduler thread and runqueue model summary
 - bootstrap to idle context-switch summary
