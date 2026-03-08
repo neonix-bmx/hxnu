@@ -516,6 +516,22 @@ pub extern "C" fn _start() -> ! {
             halt();
         }
     }
+    match vfs::discover_init_executable() {
+        Ok(candidate) => kprintln_style!(
+            crate::tty::ConsoleStyle::Accent,
+            "HXNU: init candidate path={} mount={} format={} size={} executable={}",
+            candidate.path,
+            candidate.mount.as_str(),
+            candidate.format.as_str(),
+            candidate.size,
+            yes_no(candidate.executable),
+        ),
+        Err(error) => kprintln_style!(
+            crate::tty::ConsoleStyle::Warning,
+            "HXNU: init candidate offline reason={}",
+            error.as_str()
+        ),
+    }
     for console_id in 1..tty::VIRTUAL_CONSOLE_COUNT as u32 {
         let _ = tty::write_to_console(
             console_id,

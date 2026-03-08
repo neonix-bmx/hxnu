@@ -90,7 +90,9 @@ Current bring-up logs also include:
 - read-only `procfs` snapshot bootstrap
 - read-only `devfs` namespace bootstrap
 - minimal VFS mount and read facade for `/`, `/dev`, `/proc`, and `/initrd`
+- normalized VFS path resolution and node lookup facade for mount-backed paths
 - `cpio` `newc` initrd module discovery and `/initrd` read path
+- `/initrd/init` executable candidate discovery with format probe
 - periodic scheduler tick bootstrap summary
 - scheduler thread and runqueue model summary
 - bootstrap to idle context-switch summary

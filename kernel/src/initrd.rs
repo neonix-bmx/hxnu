@@ -13,6 +13,8 @@ const CRC_MAGIC: &[u8; 6] = b"070702";
 const CPIO_HEADER_LEN: usize = 110;
 const FILE_TYPE_MASK: u32 = 0o170000;
 const FILE_TYPE_DIRECTORY: u32 = 0o040000;
+const MODE_EXECUTABLE_MASK: u32 = 0o111;
+const DEFAULT_DIRECTORY_MODE: u32 = FILE_TYPE_DIRECTORY | 0o755;
 
 struct GlobalInitrd(UnsafeCell<Option<InitrdState>>);
 
@@ -41,6 +43,7 @@ struct InitrdState {
 struct InitrdEntry {
     path: String,
     kind: InitrdEntryKind,
+    mode: u32,
     data: &'static [u8],
 }
 
@@ -48,6 +51,19 @@ struct InitrdEntry {
 enum InitrdEntryKind {
     Directory,
     File,
+}
+
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum InitrdNodeKind {
+    Directory,
+    File,
+}
+
+#[derive(Copy, Clone)]
+pub struct InitrdNodeInfo {
+    pub kind: InitrdNodeKind,
+    pub size: usize,
+    pub executable: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -151,11 +167,43 @@ pub fn read(path: &str) -> Option<String> {
     let state = unsafe { (&*INITRD.get()).as_ref()? };
     let normalized = normalize_vfs_path(path).ok()?;
 
-    let entry = state.entries.iter().find(|entry| entry.path == normalized)?;
+    let entry = find_entry(state, &normalized)?;
     match entry.kind {
         InitrdEntryKind::Directory => Some(render_directory(state, &normalized)),
         InitrdEntryKind::File => Some(String::from_utf8_lossy(entry.data).into_owned()),
     }
+}
+
+pub fn node_info(path: &str) -> Option<InitrdNodeInfo> {
+    let state = unsafe { (&*INITRD.get()).as_ref()? };
+    let normalized = normalize_vfs_path(path).ok()?;
+    let entry = find_entry(state, &normalized)?;
+
+    let kind = match entry.kind {
+        InitrdEntryKind::Directory => InitrdNodeKind::Directory,
+        InitrdEntryKind::File => InitrdNodeKind::File,
+    };
+
+    Some(InitrdNodeInfo {
+        kind,
+        size: entry.data.len(),
+        executable: entry.mode & MODE_EXECUTABLE_MASK != 0,
+    })
+}
+
+pub fn read_bytes(path: &str) -> Option<&'static [u8]> {
+    let state = unsafe { (&*INITRD.get()).as_ref()? };
+    let normalized = normalize_vfs_path(path).ok()?;
+    let entry = find_entry(state, &normalized)?;
+    if entry.kind != InitrdEntryKind::File {
+        return None;
+    }
+
+    Some(entry.data)
+}
+
+fn find_entry<'a>(state: &'a InitrdState, path: &str) -> Option<&'a InitrdEntry> {
+    state.entries.iter().find(|entry| entry.path == path)
 }
 
 fn render_directory(state: &InitrdState, path: &str) -> String {
@@ -185,7 +233,8 @@ fn render_directory(state: &InitrdState, path: &str) -> String {
 fn parse_newc_archive(archive: &'static [u8]) -> Result<Vec<InitrdEntry>, InitrdError> {
     let mut cursor = 0usize;
     let mut entries = Vec::new();
-    push_directory(&mut entries, INITRD_ROOT);
+    push_directory(&mut entries, INITRD_ROOT, DEFAULT_DIRECTORY_MODE);
+    let mut found_trailer = false;
 
     while cursor + CPIO_HEADER_LEN <= archive.len() {
         let header = &archive[cursor..cursor + CPIO_HEADER_LEN];
@@ -213,6 +262,7 @@ fn parse_newc_archive(archive: &'static [u8]) -> Result<Vec<InitrdEntry>, Initrd
         let raw_name = name_bytes.strip_suffix(&[0]).ok_or(InitrdError::InvalidArchive)?;
         let raw_name = str::from_utf8(raw_name).map_err(|_| InitrdError::InvalidEntryName)?;
         if raw_name == "TRAILER!!!" {
+            found_trailer = true;
             break;
         }
 
@@ -230,14 +280,19 @@ fn parse_newc_archive(archive: &'static [u8]) -> Result<Vec<InitrdEntry>, Initrd
         }
 
         if mode & FILE_TYPE_MASK == FILE_TYPE_DIRECTORY {
-            push_directory(&mut entries, &normalized);
+            push_directory(&mut entries, &normalized, mode);
         } else {
             entries.push(InitrdEntry {
                 path: normalized,
                 kind: InitrdEntryKind::File,
+                mode,
                 data: file_data,
             });
         }
+    }
+
+    if !found_trailer {
+        return Err(InitrdError::InvalidArchive);
     }
 
     Ok(entries)
@@ -269,21 +324,23 @@ fn ensure_parent_directories(entries: &mut Vec<InitrdEntry>, path: &str) {
     let mut end = INITRD_ROOT.len();
     while let Some(offset) = path[end + 1..].find('/') {
         end += offset + 1;
-        push_directory(entries, &path[..end]);
+        push_directory(entries, &path[..end], DEFAULT_DIRECTORY_MODE);
     }
 }
 
-fn push_directory(entries: &mut Vec<InitrdEntry>, path: &str) {
-    if entries
-        .iter()
-        .any(|entry| entry.kind == InitrdEntryKind::Directory && entry.path == path)
+fn push_directory(entries: &mut Vec<InitrdEntry>, path: &str, mode: u32) {
+    if let Some(entry) = entries
+        .iter_mut()
+        .find(|entry| entry.kind == InitrdEntryKind::Directory && entry.path == path)
     {
+        entry.mode = mode;
         return;
     }
 
     entries.push(InitrdEntry {
         path: String::from(path),
         kind: InitrdEntryKind::Directory,
+        mode,
         data: &[],
     });
 }

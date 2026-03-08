@@ -38,6 +38,12 @@ struct DevfsState {
     boot_output_count: u8,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum DevfsNodeKind {
+    Directory,
+    Device,
+}
+
 #[derive(Copy, Clone)]
 pub struct DevfsSummary {
     pub directory_count: usize,
@@ -81,10 +87,18 @@ pub fn summary() -> DevfsSummary {
     }
 }
 
+pub fn node_kind(path: &str) -> Option<DevfsNodeKind> {
+    match path {
+        "/dev" | "/dev/" => Some(DevfsNodeKind::Directory),
+        _ if DEVFS_NODES.iter().any(|node| *node == path) => Some(DevfsNodeKind::Device),
+        _ => None,
+    }
+}
+
 pub fn read(path: &str) -> Option<String> {
     let state = unsafe { (&*DEVFS.get()).as_ref()? };
     match path {
-        "/dev" => Some(render_root()),
+        "/dev" | "/dev/" => Some(render_root()),
         "/dev/console" => Some(render_console(state, "/dev/console")),
         "/dev/tty0" => Some(render_console(state, "/dev/tty0")),
         "/dev/tty1" => Some(render_console(state, "/dev/tty1")),

@@ -39,6 +39,12 @@ struct ProcfsState {
     boot_cpu: arch::x86_64::CpuInfo,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub enum ProcfsNodeKind {
+    Directory,
+    File,
+}
+
 #[derive(Copy, Clone)]
 pub struct ProcfsSummary {
     pub directory_count: usize,
@@ -80,10 +86,18 @@ pub fn summary() -> ProcfsSummary {
     }
 }
 
+pub fn node_kind(path: &str) -> Option<ProcfsNodeKind> {
+    match path {
+        "/proc" | "/proc/" => Some(ProcfsNodeKind::Directory),
+        _ if PROCFS_FILES.iter().any(|file| *file == path) => Some(ProcfsNodeKind::File),
+        _ => None,
+    }
+}
+
 pub fn read(path: &str) -> Option<String> {
     let state = unsafe { (&*PROCFS.get()).as_ref()? };
     match path {
-        "/proc" => Some(render_root()),
+        "/proc" | "/proc/" => Some(render_root()),
         "/proc/version" => Some(render_version()),
         "/proc/uptime" => Some(render_uptime()),
         "/proc/meminfo" => Some(render_meminfo()),
