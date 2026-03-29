@@ -11,6 +11,7 @@ mod devfs;
 mod exec;
 mod fb;
 mod initrd;
+mod init_exec;
 #[macro_use]
 mod log;
 mod limine;
@@ -597,6 +598,30 @@ pub extern "C" fn _start() -> ! {
         Err(error) => kprintln_style!(
             crate::tty::ConsoleStyle::Warning,
             "HXNU: init load-image offline reason={}",
+            error.as_str()
+        ),
+    }
+    let init_handoff = init_exec::activate_init_handoff();
+    match &init_handoff {
+        Ok(summary) => kprintln_style!(
+            crate::tty::ConsoleStyle::Success,
+            "HXNU: init handoff armed={} format={} entry={} machine={} type={} vm={}..{} segments={} bytes={} zero={} entry-seg={} entry-off={}",
+            yes_no(summary.armed),
+            summary.format.as_str(),
+            vfs::format_u64_hex(Some(summary.entry_point)),
+            vfs::format_u16_hex(Some(summary.machine)),
+            vfs::format_u16_hex(Some(summary.image_type)),
+            vfs::format_u64_hex(Some(summary.vm_start)),
+            vfs::format_u64_hex(Some(summary.vm_end)),
+            summary.segment_count,
+            summary.total_bytes,
+            summary.zero_fill_bytes,
+            summary.entry_segment_index,
+            summary.entry_segment_map_offset,
+        ),
+        Err(error) => kprintln_style!(
+            crate::tty::ConsoleStyle::Warning,
+            "HXNU: init handoff offline reason={}",
             error.as_str()
         ),
     }

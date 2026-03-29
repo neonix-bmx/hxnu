@@ -3,19 +3,21 @@ use core::cell::UnsafeCell;
 use core::fmt::Write;
 
 use crate::arch;
+use crate::init_exec;
 use crate::mm;
 use crate::sched;
 use crate::smp;
 use crate::time;
 
 const PROCFS_DIRECTORIES: [&str; 2] = ["/", "/proc"];
-const PROCFS_FILES: [&str; 6] = [
+const PROCFS_FILES: [&str; 7] = [
     "/proc/version",
     "/proc/uptime",
     "/proc/meminfo",
     "/proc/cpuinfo",
     "/proc/schedstat",
     "/proc/topology",
+    "/proc/initexec",
 ];
 
 struct GlobalProcfs(UnsafeCell<Option<ProcfsState>>);
@@ -104,6 +106,7 @@ pub fn read(path: &str) -> Option<String> {
         "/proc/cpuinfo" => Some(render_cpuinfo(state)),
         "/proc/schedstat" => Some(render_schedstat()),
         "/proc/topology" => Some(render_topology(state)),
+        "/proc/initexec" => Some(init_exec::render_status()),
         _ => None,
     }
 }
