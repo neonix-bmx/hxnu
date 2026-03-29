@@ -61,6 +61,7 @@ pub const LINUX_SYS_GETPPID: u64 = 110;
 pub const LINUX_SYS_SETSID: u64 = 112;
 pub const LINUX_SYS_GETPGID: u64 = 121;
 pub const LINUX_SYS_GETSID: u64 = 124;
+pub const LINUX_SYS_PRCTL: u64 = 157;
 pub const LINUX_SYS_SETRLIMIT: u64 = 160;
 pub const LINUX_SYS_GETTID: u64 = 186;
 pub const LINUX_SYS_GETDENTS64: u64 = 217;
@@ -71,9 +72,12 @@ pub const LINUX_SYS_OPENAT: u64 = 257;
 pub const LINUX_SYS_NEWFSTATAT: u64 = 262;
 pub const LINUX_SYS_READLINKAT: u64 = 267;
 pub const LINUX_SYS_FACCESSAT: u64 = 269;
+pub const LINUX_SYS_SET_ROBUST_LIST: u64 = 273;
+pub const LINUX_SYS_GET_ROBUST_LIST: u64 = 274;
 pub const LINUX_SYS_DUP3: u64 = 292;
 pub const LINUX_SYS_PRLIMIT64: u64 = 302;
 pub const LINUX_SYS_GETRANDOM: u64 = 318;
+pub const LINUX_SYS_RSEQ: u64 = 334;
 pub const LINUX_SYS_FACCESSAT2: u64 = 439;
 
 pub const GHOST_SYS_WRITE: u64 = 1;
@@ -128,6 +132,10 @@ pub const GHOST_SYS_GETSID: u64 = 49;
 pub const GHOST_SYS_GETRLIMIT: u64 = 50;
 pub const GHOST_SYS_SETRLIMIT: u64 = 51;
 pub const GHOST_SYS_PRLIMIT64: u64 = 52;
+pub const GHOST_SYS_PRCTL: u64 = 53;
+pub const GHOST_SYS_SET_ROBUST_LIST: u64 = 54;
+pub const GHOST_SYS_GET_ROBUST_LIST: u64 = 55;
+pub const GHOST_SYS_RSEQ: u64 = 56;
 
 pub const HXNU_SYS_LOG_WRITE: u64 = 0x484e_0001;
 pub const HXNU_SYS_THREAD_SELF: u64 = 0x484e_0002;
@@ -180,6 +188,10 @@ pub const HXNU_SYS_GETSID: u64 = 0x484e_0030;
 pub const HXNU_SYS_GETRLIMIT: u64 = 0x484e_0031;
 pub const HXNU_SYS_SETRLIMIT: u64 = 0x484e_0032;
 pub const HXNU_SYS_PRLIMIT64: u64 = 0x484e_0033;
+pub const HXNU_SYS_PRCTL: u64 = 0x484e_0034;
+pub const HXNU_SYS_SET_ROBUST_LIST: u64 = 0x484e_0035;
+pub const HXNU_SYS_GET_ROBUST_LIST: u64 = 0x484e_0036;
+pub const HXNU_SYS_RSEQ: u64 = 0x484e_0037;
 pub const HXNU_SYS_EXIT_GROUP: u64 = 0x484e_00ff;
 
 const HXNU_NATIVE_ABI_VERSION: i64 = 0x0001_0000;
@@ -250,6 +262,13 @@ const RLIMIT_MSGQUEUE: u32 = 12;
 const RLIMIT_NICE: u32 = 13;
 const RLIMIT_RTPRIO: u32 = 14;
 const RLIMIT_RTTIME: u32 = 15;
+const PR_GET_DUMPABLE: i32 = 3;
+const PR_SET_DUMPABLE: i32 = 4;
+const PR_SET_NAME: i32 = 15;
+const PR_GET_NAME: i32 = 16;
+const TASK_COMM_LEN: usize = 16;
+const RSEQ_FLAG_UNREGISTER: u32 = 1;
+const RSEQ_SIGNATURE: u32 = 0x5305_3053;
 
 const SEEK_SET: i32 = 0;
 const SEEK_CUR: i32 = 1;
@@ -376,6 +395,14 @@ pub struct LinuxBootstrapProbe {
     pub getrlimit_result: i64,
     pub setrlimit_result: i64,
     pub prlimit64_result: i64,
+    pub prctl_set_name_result: i64,
+    pub prctl_get_name_result: i64,
+    pub prctl_set_dumpable_result: i64,
+    pub prctl_get_dumpable_result: i64,
+    pub set_robust_list_result: i64,
+    pub get_robust_list_result: i64,
+    pub rseq_register_result: i64,
+    pub rseq_unregister_result: i64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub newfstatat_result: i64,
@@ -455,6 +482,14 @@ pub struct GhostBootstrapProbe {
     pub getrlimit_result: i64,
     pub setrlimit_result: i64,
     pub prlimit64_result: i64,
+    pub prctl_set_name_result: i64,
+    pub prctl_get_name_result: i64,
+    pub prctl_set_dumpable_result: i64,
+    pub prctl_get_dumpable_result: i64,
+    pub set_robust_list_result: i64,
+    pub get_robust_list_result: i64,
+    pub rseq_register_result: i64,
+    pub rseq_unregister_result: i64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub stat_result: i64,
@@ -530,6 +565,14 @@ pub struct HxnuBootstrapProbe {
     pub getrlimit_result: i64,
     pub setrlimit_result: i64,
     pub prlimit64_result: i64,
+    pub prctl_set_name_result: i64,
+    pub prctl_get_name_result: i64,
+    pub prctl_set_dumpable_result: i64,
+    pub prctl_get_dumpable_result: i64,
+    pub set_robust_list_result: i64,
+    pub get_robust_list_result: i64,
+    pub rseq_register_result: i64,
+    pub rseq_unregister_result: i64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub stat_result: i64,
@@ -611,6 +654,36 @@ struct LinuxTimeval {
 struct LinuxRlimit64 {
     rlim_cur: u64,
     rlim_max: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct LinuxRobustListHead {
+    list_next: u64,
+    futex_offset: i64,
+    list_op_pending: u64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct LinuxRseqArea {
+    cpu_id_start: u32,
+    cpu_id: u32,
+    rseq_cs: u64,
+    flags: u32,
+    _reserved: [u8; 12],
+}
+
+impl LinuxRseqArea {
+    const fn empty() -> Self {
+        Self {
+            cpu_id_start: 0,
+            cpu_id: 0,
+            rseq_cs: 0,
+            flags: 0,
+            _reserved: [0; 12],
+        }
+    }
 }
 
 #[repr(C)]
@@ -930,6 +1003,74 @@ impl GlobalRlimitTable {
 
 static RLIMIT_TABLE: GlobalRlimitTable = GlobalRlimitTable::new();
 
+struct ProcessPrctlState {
+    process_id: u64,
+    name: [u8; TASK_COMM_LEN],
+    dumpable: i32,
+}
+
+struct GlobalPrctlTable(UnsafeCell<Option<Vec<ProcessPrctlState>>>);
+
+unsafe impl Sync for GlobalPrctlTable {}
+
+impl GlobalPrctlTable {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<Vec<ProcessPrctlState>> {
+        self.0.get()
+    }
+}
+
+static PRCTL_TABLE: GlobalPrctlTable = GlobalPrctlTable::new();
+
+struct ProcessRobustListState {
+    process_id: u64,
+    head: usize,
+    len: usize,
+}
+
+struct GlobalRobustListTable(UnsafeCell<Option<Vec<ProcessRobustListState>>>);
+
+unsafe impl Sync for GlobalRobustListTable {}
+
+impl GlobalRobustListTable {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<Vec<ProcessRobustListState>> {
+        self.0.get()
+    }
+}
+
+static ROBUST_LIST_TABLE: GlobalRobustListTable = GlobalRobustListTable::new();
+
+struct ProcessRseqState {
+    process_id: u64,
+    address: usize,
+    length: u32,
+    signature: u32,
+    registered: bool,
+}
+
+struct GlobalRseqTable(UnsafeCell<Option<Vec<ProcessRseqState>>>);
+
+unsafe impl Sync for GlobalRseqTable {}
+
+impl GlobalRseqTable {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<Vec<ProcessRseqState>> {
+        self.0.get()
+    }
+}
+
+static RSEQ_TABLE: GlobalRseqTable = GlobalRseqTable::new();
+
 pub fn dispatch(abi: SyscallAbi, number: u64, args: [u64; 6]) -> SyscallOutcome {
     match abi {
         SyscallAbi::LinuxBootstrap => dispatch_linux_bootstrap(number, args),
@@ -983,6 +1124,10 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_GETRLIMIT => process_getrlimit(args),
         LINUX_SYS_SETRLIMIT => process_setrlimit(args),
         LINUX_SYS_PRLIMIT64 => process_prlimit64(args),
+        LINUX_SYS_PRCTL => process_prctl(args),
+        LINUX_SYS_SET_ROBUST_LIST => process_set_robust_list(args),
+        LINUX_SYS_GET_ROBUST_LIST => process_get_robust_list(args),
+        LINUX_SYS_RSEQ => process_rseq(args),
         LINUX_SYS_UMASK => process_umask(args),
         LINUX_SYS_GETUID | LINUX_SYS_GETEUID => user_id(),
         LINUX_SYS_GETGID | LINUX_SYS_GETEGID => group_id(),
@@ -1039,6 +1184,10 @@ pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         GHOST_SYS_GETRLIMIT => process_getrlimit(args),
         GHOST_SYS_SETRLIMIT => process_setrlimit(args),
         GHOST_SYS_PRLIMIT64 => process_prlimit64(args),
+        GHOST_SYS_PRCTL => process_prctl(args),
+        GHOST_SYS_SET_ROBUST_LIST => process_set_robust_list(args),
+        GHOST_SYS_GET_ROBUST_LIST => process_get_robust_list(args),
+        GHOST_SYS_RSEQ => process_rseq(args),
         GHOST_SYS_UMASK => process_umask(args),
         GHOST_SYS_GETUID | GHOST_SYS_GETEUID => user_id(),
         GHOST_SYS_GETGID | GHOST_SYS_GETEGID => group_id(),
@@ -1094,6 +1243,10 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_GETRLIMIT => process_getrlimit(args),
         HXNU_SYS_SETRLIMIT => process_setrlimit(args),
         HXNU_SYS_PRLIMIT64 => process_prlimit64(args),
+        HXNU_SYS_PRCTL => process_prctl(args),
+        HXNU_SYS_SET_ROBUST_LIST => process_set_robust_list(args),
+        HXNU_SYS_GET_ROBUST_LIST => process_get_robust_list(args),
+        HXNU_SYS_RSEQ => process_rseq(args),
         HXNU_SYS_UMASK => process_umask(args),
         HXNU_SYS_GETUID | HXNU_SYS_GETEUID => user_id(),
         HXNU_SYS_GETGID | HXNU_SYS_GETEGID => group_id(),
@@ -1292,6 +1445,87 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
             RLIMIT_NOFILE as u64,
             0,
             (&mut prlimit_old as *mut LinuxRlimit64) as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let prctl_name = b"linux-bootstrap\0";
+    let prctl_set_name_result = dispatch(
+        abi,
+        LINUX_SYS_PRCTL,
+        [PR_SET_NAME as u64, prctl_name.as_ptr() as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let mut prctl_name_readback = [0u8; TASK_COMM_LEN];
+    let prctl_get_name_result = dispatch(
+        abi,
+        LINUX_SYS_PRCTL,
+        [PR_GET_NAME as u64, prctl_name_readback.as_mut_ptr() as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let prctl_set_dumpable_result = dispatch(
+        abi,
+        LINUX_SYS_PRCTL,
+        [PR_SET_DUMPABLE as u64, 1, 0, 0, 0, 0],
+    )
+    .value;
+    let prctl_get_dumpable_result = dispatch(abi, LINUX_SYS_PRCTL, [PR_GET_DUMPABLE as u64, 0, 0, 0, 0, 0]).value;
+    let robust_head = LinuxRobustListHead {
+        list_next: 0,
+        futex_offset: 0,
+        list_op_pending: 0,
+    };
+    let set_robust_list_result = dispatch(
+        abi,
+        LINUX_SYS_SET_ROBUST_LIST,
+        [
+            (&robust_head as *const LinuxRobustListHead) as u64,
+            size_of::<LinuxRobustListHead>() as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let mut robust_head_readback = 0u64;
+    let mut robust_len_readback = 0usize;
+    let get_robust_list_result = dispatch(
+        abi,
+        LINUX_SYS_GET_ROBUST_LIST,
+        [
+            0,
+            (&mut robust_head_readback as *mut u64) as u64,
+            (&mut robust_len_readback as *mut usize) as u64,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rseq_area = LinuxRseqArea::empty();
+    let rseq_register_result = dispatch(
+        abi,
+        LINUX_SYS_RSEQ,
+        [
+            (&rseq_area as *const LinuxRseqArea) as u64,
+            size_of::<LinuxRseqArea>() as u64,
+            0,
+            RSEQ_SIGNATURE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rseq_unregister_result = dispatch(
+        abi,
+        LINUX_SYS_RSEQ,
+        [
+            (&rseq_area as *const LinuxRseqArea) as u64,
+            size_of::<LinuxRseqArea>() as u64,
+            RSEQ_FLAG_UNREGISTER as u64,
+            RSEQ_SIGNATURE as u64,
             0,
             0,
         ],
@@ -1552,6 +1786,14 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
         getrlimit_result,
         setrlimit_result,
         prlimit64_result,
+        prctl_set_name_result,
+        prctl_get_name_result,
+        prctl_set_dumpable_result,
+        prctl_get_dumpable_result,
+        set_robust_list_result,
+        get_robust_list_result,
+        rseq_register_result,
+        rseq_unregister_result,
         pread64_result,
         pwrite64_result,
         readv_result,
@@ -1781,6 +2023,87 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         ],
     )
     .value;
+    let prctl_name = b"ghost-bootstrap\0";
+    let prctl_set_name_result = dispatch(
+        abi,
+        GHOST_SYS_PRCTL,
+        [PR_SET_NAME as u64, prctl_name.as_ptr() as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let mut prctl_name_readback = [0u8; TASK_COMM_LEN];
+    let prctl_get_name_result = dispatch(
+        abi,
+        GHOST_SYS_PRCTL,
+        [PR_GET_NAME as u64, prctl_name_readback.as_mut_ptr() as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let prctl_set_dumpable_result = dispatch(
+        abi,
+        GHOST_SYS_PRCTL,
+        [PR_SET_DUMPABLE as u64, 1, 0, 0, 0, 0],
+    )
+    .value;
+    let prctl_get_dumpable_result = dispatch(abi, GHOST_SYS_PRCTL, [PR_GET_DUMPABLE as u64, 0, 0, 0, 0, 0]).value;
+    let robust_head = LinuxRobustListHead {
+        list_next: 0,
+        futex_offset: 0,
+        list_op_pending: 0,
+    };
+    let set_robust_list_result = dispatch(
+        abi,
+        GHOST_SYS_SET_ROBUST_LIST,
+        [
+            (&robust_head as *const LinuxRobustListHead) as u64,
+            size_of::<LinuxRobustListHead>() as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let mut robust_head_readback = 0u64;
+    let mut robust_len_readback = 0usize;
+    let get_robust_list_result = dispatch(
+        abi,
+        GHOST_SYS_GET_ROBUST_LIST,
+        [
+            0,
+            (&mut robust_head_readback as *mut u64) as u64,
+            (&mut robust_len_readback as *mut usize) as u64,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rseq_area = LinuxRseqArea::empty();
+    let rseq_register_result = dispatch(
+        abi,
+        GHOST_SYS_RSEQ,
+        [
+            (&rseq_area as *const LinuxRseqArea) as u64,
+            size_of::<LinuxRseqArea>() as u64,
+            0,
+            RSEQ_SIGNATURE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rseq_unregister_result = dispatch(
+        abi,
+        GHOST_SYS_RSEQ,
+        [
+            (&rseq_area as *const LinuxRseqArea) as u64,
+            size_of::<LinuxRseqArea>() as u64,
+            RSEQ_FLAG_UNREGISTER as u64,
+            RSEQ_SIGNATURE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
     let writev_iov = [
         LinuxIovec {
             iov_base: WRITEV_SMOKE_A.as_ptr() as u64,
@@ -1999,6 +2322,14 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         getrlimit_result,
         setrlimit_result,
         prlimit64_result,
+        prctl_set_name_result,
+        prctl_get_name_result,
+        prctl_set_dumpable_result,
+        prctl_get_dumpable_result,
+        set_robust_list_result,
+        get_robust_list_result,
+        rseq_register_result,
+        rseq_unregister_result,
         pread64_result,
         pwrite64_result,
         readv_result,
@@ -2217,6 +2548,87 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         ],
     )
     .value;
+    let prctl_name = b"hxnu-bootstrap\0";
+    let prctl_set_name_result = dispatch(
+        abi,
+        HXNU_SYS_PRCTL,
+        [PR_SET_NAME as u64, prctl_name.as_ptr() as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let mut prctl_name_readback = [0u8; TASK_COMM_LEN];
+    let prctl_get_name_result = dispatch(
+        abi,
+        HXNU_SYS_PRCTL,
+        [PR_GET_NAME as u64, prctl_name_readback.as_mut_ptr() as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let prctl_set_dumpable_result = dispatch(
+        abi,
+        HXNU_SYS_PRCTL,
+        [PR_SET_DUMPABLE as u64, 1, 0, 0, 0, 0],
+    )
+    .value;
+    let prctl_get_dumpable_result = dispatch(abi, HXNU_SYS_PRCTL, [PR_GET_DUMPABLE as u64, 0, 0, 0, 0, 0]).value;
+    let robust_head = LinuxRobustListHead {
+        list_next: 0,
+        futex_offset: 0,
+        list_op_pending: 0,
+    };
+    let set_robust_list_result = dispatch(
+        abi,
+        HXNU_SYS_SET_ROBUST_LIST,
+        [
+            (&robust_head as *const LinuxRobustListHead) as u64,
+            size_of::<LinuxRobustListHead>() as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let mut robust_head_readback = 0u64;
+    let mut robust_len_readback = 0usize;
+    let get_robust_list_result = dispatch(
+        abi,
+        HXNU_SYS_GET_ROBUST_LIST,
+        [
+            0,
+            (&mut robust_head_readback as *mut u64) as u64,
+            (&mut robust_len_readback as *mut usize) as u64,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rseq_area = LinuxRseqArea::empty();
+    let rseq_register_result = dispatch(
+        abi,
+        HXNU_SYS_RSEQ,
+        [
+            (&rseq_area as *const LinuxRseqArea) as u64,
+            size_of::<LinuxRseqArea>() as u64,
+            0,
+            RSEQ_SIGNATURE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rseq_unregister_result = dispatch(
+        abi,
+        HXNU_SYS_RSEQ,
+        [
+            (&rseq_area as *const LinuxRseqArea) as u64,
+            size_of::<LinuxRseqArea>() as u64,
+            RSEQ_FLAG_UNREGISTER as u64,
+            RSEQ_SIGNATURE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
     let writev_iov = [
         LinuxIovec {
             iov_base: WRITEV_SMOKE_A.as_ptr() as u64,
@@ -2426,6 +2838,14 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         getrlimit_result,
         setrlimit_result,
         prlimit64_result,
+        prctl_set_name_result,
+        prctl_get_name_result,
+        prctl_set_dumpable_result,
+        prctl_get_dumpable_result,
+        set_robust_list_result,
+        get_robust_list_result,
+        rseq_register_result,
+        rseq_unregister_result,
         pread64_result,
         pwrite64_result,
         readv_result,
@@ -2814,6 +3234,142 @@ fn process_prlimit64(args: [u64; 6]) -> SyscallOutcome {
         return SyscallOutcome::errno(error);
     }
     set_process_rlimit(resource, next_limit);
+    SyscallOutcome::success(0)
+}
+
+fn process_prctl(args: [u64; 6]) -> SyscallOutcome {
+    let option = match i32::try_from(args[0]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    match option {
+        PR_SET_DUMPABLE => {
+            let value = match i32::try_from(args[1]) {
+                Ok(value) => value,
+                Err(_) => return SyscallOutcome::errno(EINVAL),
+            };
+            if value != 0 && value != 1 {
+                return SyscallOutcome::errno(EINVAL);
+            }
+            set_process_dumpable(value);
+            SyscallOutcome::success(0)
+        }
+        PR_GET_DUMPABLE => SyscallOutcome::success(i64::from(current_process_dumpable())),
+        PR_SET_NAME => {
+            let name_ptr = args[1] as usize;
+            if name_ptr == 0 {
+                return SyscallOutcome::errno(EINVAL);
+            }
+            let name = match copyin_comm_name(name_ptr) {
+                Ok(name) => name,
+                Err(error) => return SyscallOutcome::errno(error),
+            };
+            set_process_comm_name(name);
+            SyscallOutcome::success(0)
+        }
+        PR_GET_NAME => {
+            let name_ptr = args[1] as usize;
+            if name_ptr == 0 {
+                return SyscallOutcome::errno(EINVAL);
+            }
+            let name = current_process_comm_name();
+            if let Err(error) = copyout_struct(name_ptr, &name) {
+                return SyscallOutcome::errno(error);
+            }
+            SyscallOutcome::success(0)
+        }
+        _ => SyscallOutcome::errno(EINVAL),
+    }
+}
+
+fn process_set_robust_list(args: [u64; 6]) -> SyscallOutcome {
+    let head = args[0] as usize;
+    let len = match usize::try_from(args[1]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    if len != size_of::<LinuxRobustListHead>() {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    set_process_robust_list(head, len);
+    SyscallOutcome::success(0)
+}
+
+fn process_get_robust_list(args: [u64; 6]) -> SyscallOutcome {
+    let pid = args[0] as i64;
+    let head_ptr_ptr = args[1] as usize;
+    let len_ptr = args[2] as usize;
+    if head_ptr_ptr == 0 || len_ptr == 0 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    let current_pid = match i64::try_from(current_process_id_value()) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    if pid != 0 && pid != current_pid {
+        return SyscallOutcome::errno(ESRCH);
+    }
+
+    let (head, len) = current_process_robust_list();
+    let head_u64 = match u64::try_from(head) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    if let Err(error) = copyout_struct(head_ptr_ptr, &head_u64) {
+        return SyscallOutcome::errno(error);
+    }
+    if let Err(error) = copyout_struct(len_ptr, &len) {
+        return SyscallOutcome::errno(error);
+    }
+    SyscallOutcome::success(0)
+}
+
+fn process_rseq(args: [u64; 6]) -> SyscallOutcome {
+    let address = args[0] as usize;
+    let length = match u32::try_from(args[1]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    let flags = match u32::try_from(args[2]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    let signature = match u32::try_from(args[3]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    if length != size_of::<LinuxRseqArea>() as u32 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+    if flags & !RSEQ_FLAG_UNREGISTER != 0 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    if flags == RSEQ_FLAG_UNREGISTER {
+        let current = current_process_rseq_state();
+        if !current.registered
+            || current.address != address
+            || current.length != length
+            || current.signature != signature
+        {
+            return SyscallOutcome::errno(EINVAL);
+        }
+        clear_process_rseq_state();
+        return SyscallOutcome::success(0);
+    }
+
+    if address == 0 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+    set_process_rseq_state(ProcessRseqState {
+        process_id: current_process_id_value(),
+        address,
+        length,
+        signature,
+        registered: true,
+    });
     SyscallOutcome::success(0)
 }
 
@@ -3679,6 +4235,9 @@ fn exit_group(args: [u64; 6]) -> SyscallOutcome {
     purge_process_brk(process_id);
     purge_process_group_state(process_id);
     purge_process_rlimits(process_id);
+    purge_process_prctl_state(process_id);
+    purge_process_robust_list_state(process_id);
+    purge_process_rseq_state(process_id);
     purge_process_signal_mask(process_id);
     purge_process_signal_actions(process_id);
     SyscallOutcome {
@@ -4150,6 +4709,174 @@ fn set_process_rlimit(resource: u32, limits: LinuxRlimit64) {
         process_id,
         resource,
         limits,
+    });
+}
+
+fn default_process_comm_name() -> [u8; TASK_COMM_LEN] {
+    let mut name = [0u8; TASK_COMM_LEN];
+    let thread_name = sched::stats().current_thread_name.as_bytes();
+    let copy_len = min(thread_name.len(), TASK_COMM_LEN.saturating_sub(1));
+    name[..copy_len].copy_from_slice(&thread_name[..copy_len]);
+    name
+}
+
+fn current_process_prctl_state() -> ProcessPrctlState {
+    let process_id = current_process_id_value();
+    let table = prctl_table_mut();
+    if let Some(entry) = table.iter().find(|entry| entry.process_id == process_id) {
+        return ProcessPrctlState {
+            process_id,
+            name: entry.name,
+            dumpable: entry.dumpable,
+        };
+    }
+
+    let default = ProcessPrctlState {
+        process_id,
+        name: default_process_comm_name(),
+        dumpable: 1,
+    };
+    table.push(ProcessPrctlState {
+        process_id,
+        name: default.name,
+        dumpable: default.dumpable,
+    });
+    default
+}
+
+fn set_process_comm_name(name: [u8; TASK_COMM_LEN]) {
+    let process_id = current_process_id_value();
+    let table = prctl_table_mut();
+    if let Some(entry) = table.iter_mut().find(|entry| entry.process_id == process_id) {
+        entry.name = name;
+        return;
+    }
+
+    table.push(ProcessPrctlState {
+        process_id,
+        name,
+        dumpable: 1,
+    });
+}
+
+fn current_process_comm_name() -> [u8; TASK_COMM_LEN] {
+    current_process_prctl_state().name
+}
+
+fn set_process_dumpable(dumpable: i32) {
+    let process_id = current_process_id_value();
+    let table = prctl_table_mut();
+    if let Some(entry) = table.iter_mut().find(|entry| entry.process_id == process_id) {
+        entry.dumpable = dumpable;
+        return;
+    }
+
+    table.push(ProcessPrctlState {
+        process_id,
+        name: default_process_comm_name(),
+        dumpable,
+    });
+}
+
+fn current_process_dumpable() -> i32 {
+    current_process_prctl_state().dumpable
+}
+
+fn current_process_robust_list() -> (usize, usize) {
+    let process_id = current_process_id_value();
+    let table = robust_list_table_mut();
+    if let Some(entry) = table.iter().find(|entry| entry.process_id == process_id) {
+        return (entry.head, entry.len);
+    }
+
+    let default_len = size_of::<LinuxRobustListHead>();
+    table.push(ProcessRobustListState {
+        process_id,
+        head: 0,
+        len: default_len,
+    });
+    (0, default_len)
+}
+
+fn set_process_robust_list(head: usize, len: usize) {
+    let process_id = current_process_id_value();
+    let table = robust_list_table_mut();
+    if let Some(entry) = table.iter_mut().find(|entry| entry.process_id == process_id) {
+        entry.head = head;
+        entry.len = len;
+        return;
+    }
+
+    table.push(ProcessRobustListState { process_id, head, len });
+}
+
+fn current_process_rseq_state() -> ProcessRseqState {
+    let process_id = current_process_id_value();
+    let table = rseq_table_mut();
+    if let Some(entry) = table.iter().find(|entry| entry.process_id == process_id) {
+        return ProcessRseqState {
+            process_id,
+            address: entry.address,
+            length: entry.length,
+            signature: entry.signature,
+            registered: entry.registered,
+        };
+    }
+
+    let default = ProcessRseqState {
+        process_id,
+        address: 0,
+        length: size_of::<LinuxRseqArea>() as u32,
+        signature: RSEQ_SIGNATURE,
+        registered: false,
+    };
+    table.push(ProcessRseqState {
+        process_id,
+        address: default.address,
+        length: default.length,
+        signature: default.signature,
+        registered: default.registered,
+    });
+    default
+}
+
+fn set_process_rseq_state(state: ProcessRseqState) {
+    let process_id = current_process_id_value();
+    let table = rseq_table_mut();
+    if let Some(entry) = table.iter_mut().find(|entry| entry.process_id == process_id) {
+        entry.address = state.address;
+        entry.length = state.length;
+        entry.signature = state.signature;
+        entry.registered = state.registered;
+        return;
+    }
+
+    table.push(ProcessRseqState {
+        process_id,
+        address: state.address,
+        length: state.length,
+        signature: state.signature,
+        registered: state.registered,
+    });
+}
+
+fn clear_process_rseq_state() {
+    let process_id = current_process_id_value();
+    let table = rseq_table_mut();
+    if let Some(entry) = table.iter_mut().find(|entry| entry.process_id == process_id) {
+        entry.address = 0;
+        entry.length = size_of::<LinuxRseqArea>() as u32;
+        entry.signature = RSEQ_SIGNATURE;
+        entry.registered = false;
+        return;
+    }
+
+    table.push(ProcessRseqState {
+        process_id,
+        address: 0,
+        length: size_of::<LinuxRseqArea>() as u32,
+        signature: RSEQ_SIGNATURE,
+        registered: false,
     });
 }
 
@@ -4660,6 +5387,21 @@ fn purge_process_rlimits(process_id: u64) {
     table.retain(|entry| entry.process_id != process_id);
 }
 
+fn purge_process_prctl_state(process_id: u64) {
+    let table = prctl_table_mut();
+    table.retain(|entry| entry.process_id != process_id);
+}
+
+fn purge_process_robust_list_state(process_id: u64) {
+    let table = robust_list_table_mut();
+    table.retain(|entry| entry.process_id != process_id);
+}
+
+fn purge_process_rseq_state(process_id: u64) {
+    let table = rseq_table_mut();
+    table.retain(|entry| entry.process_id != process_id);
+}
+
 fn purge_process_signal_mask(process_id: u64) {
     let table = signal_mask_table_mut();
     table.retain(|entry| entry.process_id != process_id);
@@ -4732,6 +5474,30 @@ fn rlimit_table_mut() -> &'static mut Vec<ProcessRlimitState> {
         *slot = Some(Vec::new());
     }
     slot.as_mut().expect("rlimit table initialized")
+}
+
+fn prctl_table_mut() -> &'static mut Vec<ProcessPrctlState> {
+    let slot = unsafe { &mut *PRCTL_TABLE.get() };
+    if slot.is_none() {
+        *slot = Some(Vec::new());
+    }
+    slot.as_mut().expect("prctl table initialized")
+}
+
+fn robust_list_table_mut() -> &'static mut Vec<ProcessRobustListState> {
+    let slot = unsafe { &mut *ROBUST_LIST_TABLE.get() };
+    if slot.is_none() {
+        *slot = Some(Vec::new());
+    }
+    slot.as_mut().expect("robust-list table initialized")
+}
+
+fn rseq_table_mut() -> &'static mut Vec<ProcessRseqState> {
+    let slot = unsafe { &mut *RSEQ_TABLE.get() };
+    if slot.is_none() {
+        *slot = Some(Vec::new());
+    }
+    slot.as_mut().expect("rseq table initialized")
 }
 
 fn signal_mask_table_mut() -> &'static mut Vec<ProcessSignalMask> {
@@ -4808,6 +5574,16 @@ fn copyin_rlimit(ptr: usize) -> Result<LinuxRlimit64, i64> {
     let rlim_cur = u64::from_le_bytes(bytes[0..8].try_into().map_err(|_| EINVAL)?);
     let rlim_max = u64::from_le_bytes(bytes[8..16].try_into().map_err(|_| EINVAL)?);
     Ok(LinuxRlimit64 { rlim_cur, rlim_max })
+}
+
+fn copyin_comm_name(ptr: usize) -> Result<[u8; TASK_COMM_LEN], i64> {
+    let bytes = copyin_bytes(ptr, TASK_COMM_LEN)?;
+    let mut name = [0u8; TASK_COMM_LEN];
+    let mut copy_len = bytes.iter().position(|&byte| byte == 0).unwrap_or(bytes.len());
+    copy_len = min(copy_len, TASK_COMM_LEN.saturating_sub(1));
+    name[..copy_len].copy_from_slice(&bytes[..copy_len]);
+    name[copy_len] = 0;
+    Ok(name)
 }
 
 fn copyin_iovec_at(iov_ptr: usize, index: usize) -> Result<LinuxIovec, i64> {
