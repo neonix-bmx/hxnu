@@ -21,6 +21,7 @@ pub const HXNU_ABI_NAME: &str = "hxnu-native-bootstrap";
 pub const LINUX_SYS_READ: u64 = 0;
 pub const LINUX_SYS_WRITE: u64 = 1;
 pub const LINUX_SYS_CLOSE: u64 = 3;
+pub const LINUX_SYS_LSEEK: u64 = 8;
 pub const LINUX_SYS_SCHED_YIELD: u64 = 24;
 pub const LINUX_SYS_GETPID: u64 = 39;
 pub const LINUX_SYS_EXIT: u64 = 60;
@@ -41,6 +42,7 @@ pub const GHOST_SYS_EXIT_GROUP: u64 = 7;
 pub const GHOST_SYS_OPEN: u64 = 8;
 pub const GHOST_SYS_READ: u64 = 9;
 pub const GHOST_SYS_CLOSE: u64 = 10;
+pub const GHOST_SYS_SEEK: u64 = 11;
 
 pub const HXNU_SYS_LOG_WRITE: u64 = 0x484e_0001;
 pub const HXNU_SYS_THREAD_SELF: u64 = 0x484e_0002;
@@ -51,6 +53,7 @@ pub const HXNU_SYS_ABI_VERSION: u64 = 0x484e_0006;
 pub const HXNU_SYS_OPEN: u64 = 0x484e_0007;
 pub const HXNU_SYS_READ: u64 = 0x484e_0008;
 pub const HXNU_SYS_CLOSE: u64 = 0x484e_0009;
+pub const HXNU_SYS_SEEK: u64 = 0x484e_000a;
 pub const HXNU_SYS_EXIT_GROUP: u64 = 0x484e_00ff;
 
 const HXNU_NATIVE_ABI_VERSION: i64 = 0x0001_0000;
@@ -63,6 +66,10 @@ const O_RDONLY: u64 = 0;
 const O_CREAT: u64 = 0x40;
 const O_TRUNC: u64 = 0x200;
 const O_APPEND: u64 = 0x400;
+
+const SEEK_SET: i32 = 0;
+const SEEK_CUR: i32 = 1;
+const SEEK_END: i32 = 2;
 
 const MAX_WRITE_BYTES: usize = 16 * 1024;
 const MAX_READ_BYTES: usize = 64 * 1024;
@@ -131,6 +138,7 @@ pub struct LinuxBootstrapProbe {
     pub write_result: i64,
     pub openat_result: i64,
     pub read_result: i64,
+    pub lseek_result: i64,
     pub close_result: i64,
     pub getpid_result: i64,
     pub getppid_result: i64,
@@ -157,6 +165,7 @@ pub struct GhostBootstrapProbe {
     pub write_result: i64,
     pub open_result: i64,
     pub read_result: i64,
+    pub seek_result: i64,
     pub close_result: i64,
     pub getpid_result: i64,
     pub gettid_result: i64,
@@ -180,6 +189,7 @@ pub struct HxnuBootstrapProbe {
     pub write_result: i64,
     pub open_result: i64,
     pub read_result: i64,
+    pub seek_result: i64,
     pub close_result: i64,
     pub process_self_result: i64,
     pub thread_self_result: i64,
@@ -272,6 +282,7 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_READ => read_from_fd(args),
         LINUX_SYS_WRITE => write_with_fd(args),
         LINUX_SYS_CLOSE => close_fd(args),
+        LINUX_SYS_LSEEK => seek_fd(args),
         LINUX_SYS_OPENAT => linux_openat(args),
         LINUX_SYS_SCHED_YIELD => SyscallOutcome::success(0),
         LINUX_SYS_GETPID => process_id(),
@@ -290,6 +301,7 @@ pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         GHOST_SYS_OPEN => open_path_at(AT_FDCWD, args[0] as usize, args[1]),
         GHOST_SYS_READ => read_from_fd(args),
         GHOST_SYS_CLOSE => close_fd(args),
+        GHOST_SYS_SEEK => seek_fd(args),
         GHOST_SYS_YIELD => SyscallOutcome::success(0),
         GHOST_SYS_GETPID => process_id(),
         GHOST_SYS_GETTID => thread_id(),
@@ -306,6 +318,7 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_OPEN => open_path_at(AT_FDCWD, args[0] as usize, args[1]),
         HXNU_SYS_READ => read_from_fd(args),
         HXNU_SYS_CLOSE => close_fd(args),
+        HXNU_SYS_SEEK => seek_fd(args),
         HXNU_SYS_THREAD_SELF => thread_id(),
         HXNU_SYS_PROCESS_SELF => process_id(),
         HXNU_SYS_UPTIME_NSEC => uptime_ns(),
@@ -343,6 +356,7 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     .value;
     let mut read_buffer = [0u8; 64];
     let mut read_result = -EBADF;
+    let mut lseek_result = -EBADF;
     let mut close_result = -EBADF;
     if openat_result >= 0 {
         let fd = openat_result as u64;
@@ -352,6 +366,7 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
             [fd, read_buffer.as_mut_ptr() as u64, read_buffer.len() as u64, 0, 0, 0],
         )
         .value;
+        lseek_result = dispatch(abi, LINUX_SYS_LSEEK, [fd, 0, SEEK_SET as u64, 0, 0, 0]).value;
         close_result = dispatch(abi, LINUX_SYS_CLOSE, [fd, 0, 0, 0, 0, 0]).value;
     }
 
@@ -393,6 +408,7 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
         write_result,
         openat_result,
         read_result,
+        lseek_result,
         close_result,
         getpid_result,
         getppid_result,
@@ -431,6 +447,7 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
 
     let mut read_buffer = [0u8; 64];
     let mut read_result = -EBADF;
+    let mut seek_result = -EBADF;
     let mut close_result = -EBADF;
     if open_result >= 0 {
         let fd = open_result as u64;
@@ -440,6 +457,7 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
             [fd, read_buffer.as_mut_ptr() as u64, read_buffer.len() as u64, 0, 0, 0],
         )
         .value;
+        seek_result = dispatch(abi, GHOST_SYS_SEEK, [fd, 0, SEEK_SET as u64, 0, 0, 0]).value;
         close_result = dispatch(abi, GHOST_SYS_CLOSE, [fd, 0, 0, 0, 0, 0]).value;
     }
 
@@ -466,6 +484,7 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         write_result,
         open_result,
         read_result,
+        seek_result,
         close_result,
         getpid_result,
         gettid_result,
@@ -494,6 +513,7 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
 
     let mut read_buffer = [0u8; 64];
     let mut read_result = -EBADF;
+    let mut seek_result = -EBADF;
     let mut close_result = -EBADF;
     if open_result >= 0 {
         let fd = open_result as u64;
@@ -503,6 +523,7 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
             [fd, read_buffer.as_mut_ptr() as u64, read_buffer.len() as u64, 0, 0, 0],
         )
         .value;
+        seek_result = dispatch(abi, HXNU_SYS_SEEK, [fd, 0, SEEK_SET as u64, 0, 0, 0]).value;
         close_result = dispatch(abi, HXNU_SYS_CLOSE, [fd, 0, 0, 0, 0, 0]).value;
     }
 
@@ -519,6 +540,7 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         write_result,
         open_result,
         read_result,
+        seek_result,
         close_result,
         process_self_result,
         thread_self_result,
@@ -603,6 +625,22 @@ fn close_fd(args: [u64; 6]) -> SyscallOutcome {
     };
     match close_open_file(fd) {
         Ok(value) => SyscallOutcome::success(value),
+        Err(error) => SyscallOutcome::errno(error),
+    }
+}
+
+fn seek_fd(args: [u64; 6]) -> SyscallOutcome {
+    let fd = match parse_fd(args[0]) {
+        Ok(fd) => fd,
+        Err(error) => return SyscallOutcome::errno(error),
+    };
+    let whence = match i32::try_from(args[2]) {
+        Ok(whence) => whence,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    let offset = args[1] as i64;
+    match seek_open_file(fd, offset, whence) {
+        Ok(position) => SyscallOutcome::success(position),
         Err(error) => SyscallOutcome::errno(error),
     }
 }
@@ -836,6 +874,30 @@ fn close_open_file(fd: i32) -> Result<i64, i64> {
         return Ok(0);
     }
     Err(EBADF)
+}
+
+fn seek_open_file(fd: i32, offset: i64, whence: i32) -> Result<i64, i64> {
+    let owner_process_id = current_process_id_value();
+    let table = fd_table_mut();
+    let open = table
+        .files
+        .iter_mut()
+        .find(|file| file.fd == fd && file.owner_process_id == owner_process_id)
+        .ok_or(EBADF)?;
+
+    let base = match whence {
+        SEEK_SET => 0,
+        SEEK_CUR => i64::try_from(open.offset).map_err(|_| ERANGE)?,
+        SEEK_END => i64::try_from(open.content.len()).map_err(|_| ERANGE)?,
+        _ => return Err(EINVAL),
+    };
+
+    let next_offset = base.checked_add(offset).ok_or(ERANGE)?;
+    if next_offset < 0 {
+        return Err(EINVAL);
+    }
+    open.offset = usize::try_from(next_offset).map_err(|_| ERANGE)?;
+    i64::try_from(open.offset).map_err(|_| ERANGE)
 }
 
 fn purge_open_files_for_process(process_id: u64) {
