@@ -1,12 +1,15 @@
 use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
 use core::cmp::min;
-use core::mem::size_of;
+use core::mem::size_of_val;
 use core::slice;
 use core::str;
 
 use crate::sched;
 use crate::time;
 use crate::tty;
+use crate::uaccess::{self, UserCopyError};
 
 pub const LINUX_ABI_NAME: &str = "linux-x86_64-bootstrap";
 pub const GHOST_ABI_NAME: &str = "ghost-bootstrap";
@@ -46,16 +49,12 @@ const LINUX_CLOCK_MONOTONIC: i32 = 1;
 const MAX_WRITE_BYTES: usize = 16 * 1024;
 
 const EBADF: i64 = 9;
-const EFAULT: i64 = 14;
 const EINVAL: i64 = 22;
 const ENOSYS: i64 = 38;
 const ERANGE: i64 = 34;
 
 const STDOUT_FD: u64 = 1;
 const STDERR_FD: u64 = 2;
-
-const LOW_CANONICAL_MAX: usize = (1usize << 47) - 1;
-const HIGH_CANONICAL_MIN: usize = !LOW_CANONICAL_MAX;
 
 #[derive(Copy, Clone)]
 pub enum SyscallAbi {
@@ -411,12 +410,12 @@ fn write_text(ptr: usize, len: u64) -> SyscallOutcome {
         return SyscallOutcome::success(0);
     }
 
-    let bytes = match trusted_const_slice(ptr, count) {
+    let bytes = match copyin_bytes(ptr, count) {
         Ok(bytes) => bytes,
         Err(error) => return SyscallOutcome::errno(error),
     };
 
-    let text = sanitize_for_console(bytes);
+    let text = sanitize_for_console(&bytes);
     tty::write_str(&text);
 
     match i64::try_from(count) {
@@ -452,18 +451,13 @@ fn linux_clock_gettime(args: [u64; 6]) -> SyscallOutcome {
     }
 
     let ptr = args[1] as usize;
-    let destination = match trusted_mut_ptr::<LinuxTimespec>(ptr) {
-        Ok(destination) => destination,
-        Err(error) => return SyscallOutcome::errno(error),
-    };
-
     let uptime_ns = time::uptime_nanoseconds();
     let timespec = LinuxTimespec {
         tv_sec: (uptime_ns / 1_000_000_000) as i64,
         tv_nsec: (uptime_ns % 1_000_000_000) as i64,
     };
-    unsafe {
-        destination.write(timespec);
+    if let Err(error) = copyout_struct(ptr, &timespec) {
+        return SyscallOutcome::errno(error);
     }
 
     SyscallOutcome::success(0)
@@ -502,11 +496,6 @@ fn write_uname(
     machine: &str,
     domainname: &str,
 ) -> SyscallOutcome {
-    let destination = match trusted_mut_ptr::<LinuxUtsName>(ptr) {
-        Ok(destination) => destination,
-        Err(error) => return SyscallOutcome::errno(error),
-    };
-
     let mut uts = LinuxUtsName::new();
     write_uts_field(&mut uts.sysname, sysname);
     write_uts_field(&mut uts.nodename, nodename);
@@ -514,8 +503,8 @@ fn write_uname(
     write_uts_field(&mut uts.version, version);
     write_uts_field(&mut uts.machine, machine);
     write_uts_field(&mut uts.domainname, domainname);
-    unsafe {
-        destination.write(uts);
+    if let Err(error) = copyout_struct(ptr, &uts) {
+        return SyscallOutcome::errno(error);
     }
 
     SyscallOutcome::success(0)
@@ -547,36 +536,19 @@ fn sanitize_for_console(bytes: &[u8]) -> String {
     text
 }
 
-fn trusted_const_slice(ptr: usize, len: usize) -> Result<&'static [u8], i64> {
-    validate_address_range(ptr, len)?;
-    let source = ptr as *const u8;
-    // Bootstrap mode: pointers are expected to reference kernel-mapped buffers.
-    Ok(unsafe { slice::from_raw_parts(source, len) })
+fn copyin_bytes(ptr: usize, len: usize) -> Result<Vec<u8>, i64> {
+    let mut bytes = vec![0u8; len];
+    uaccess::copyin(ptr, &mut bytes).map_err(map_uaccess_error)?;
+    Ok(bytes)
 }
 
-fn trusted_mut_ptr<T>(ptr: usize) -> Result<*mut T, i64> {
-    validate_address_range(ptr, size_of::<T>())?;
-    Ok(ptr as *mut T)
+fn copyout_struct<T: Copy>(ptr: usize, value: &T) -> Result<(), i64> {
+    let bytes = unsafe { slice::from_raw_parts((value as *const T).cast::<u8>(), size_of_val(value)) };
+    uaccess::copyout(bytes, ptr).map_err(map_uaccess_error)
 }
 
-fn validate_address_range(start: usize, len: usize) -> Result<(), i64> {
-    if len == 0 {
-        return Ok(());
-    }
-    if start == 0 {
-        return Err(EFAULT);
-    }
-
-    let end = start.checked_add(len - 1).ok_or(EFAULT)?;
-    if !is_canonical_address(start) || !is_canonical_address(end) {
-        return Err(EFAULT);
-    }
-
-    Ok(())
-}
-
-const fn is_canonical_address(address: usize) -> bool {
-    address <= LOW_CANONICAL_MAX || address >= HIGH_CANONICAL_MIN
+fn map_uaccess_error(error: UserCopyError) -> i64 {
+    error.as_errno()
 }
 
 fn write_uts_field(field: &mut [u8; 65], value: &str) {

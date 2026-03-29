@@ -1,12 +1,92 @@
-use core::arch::asm;
+use core::arch::{asm, global_asm};
 use core::cell::UnsafeCell;
 use core::mem::size_of;
 use core::ptr;
 
 use crate::kprintln;
 use crate::panic::write_fatal_line;
+use crate::syscall::{self, SyscallAbi, SyscallAction};
 
 use super::apic;
+
+const SYSCALL_VECTOR: usize = 0x80;
+const INTERRUPT_GATE: u8 = 0x8e;
+const USER_INTERRUPT_GATE: u8 = 0xee;
+
+unsafe extern "C" {
+    fn hxnu_x86_64_syscall_entry();
+}
+
+global_asm!(
+    r#"
+    .global hxnu_x86_64_syscall_entry
+    .type hxnu_x86_64_syscall_entry,@function
+hxnu_x86_64_syscall_entry:
+    push r15
+    push r14
+    push r13
+    push r12
+    push r11
+    push r10
+    push r9
+    push r8
+    push rdi
+    push rsi
+    push rdx
+    push rcx
+    push rbx
+    push rax
+
+    mov rdi, rsp
+    sub rsp, 8
+    call hxnu_x86_64_handle_syscall_frame
+    add rsp, 8
+
+    mov [rsp], rax
+
+    pop rax
+    pop rbx
+    pop rcx
+    pop rdx
+    pop rsi
+    pop rdi
+    pop r8
+    pop r9
+    pop r10
+    pop r11
+    pop r12
+    pop r13
+    pop r14
+    pop r15
+    iretq
+"#
+);
+
+#[repr(C)]
+struct SyscallRegisterFrame {
+    rax: u64,
+    rbx: u64,
+    rcx: u64,
+    rdx: u64,
+    rsi: u64,
+    rdi: u64,
+    r8: u64,
+    r9: u64,
+    r10: u64,
+    r11: u64,
+    r12: u64,
+    r13: u64,
+    r14: u64,
+    r15: u64,
+}
+
+#[derive(Copy, Clone)]
+pub struct SyscallSelfTest {
+    pub linux_write_result: i64,
+    pub linux_getpid_result: i64,
+    pub ghost_gettid_result: i64,
+    pub hxnu_abi_version_result: i64,
+}
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -44,10 +124,19 @@ impl IdtEntry {
     }
 
     fn set_handler_addr(&mut self, handler: usize, selector: u16) {
+        self.set_handler_addr_with_attributes(handler, selector, INTERRUPT_GATE);
+    }
+
+    fn set_handler_addr_with_attributes(
+        &mut self,
+        handler: usize,
+        selector: u16,
+        type_attributes: u8,
+    ) {
         self.pointer_low = handler as u16;
         self.selector = selector;
         self.ist = 0;
-        self.type_attributes = 0x8e;
+        self.type_attributes = type_attributes;
         self.pointer_middle = (handler >> 16) as u16;
         self.pointer_high = (handler >> 32) as u32;
         self.reserved = 0;
@@ -105,6 +194,11 @@ pub fn initialize() {
         spurious_interrupt_handler as *const () as usize,
         code_selector,
     );
+    idt.entries[SYSCALL_VECTOR].set_handler_addr_with_attributes(
+        hxnu_x86_64_syscall_entry as *const () as usize,
+        code_selector,
+        USER_INTERRUPT_GATE,
+    );
 
     let idtr = DescriptorTablePointer {
         limit: (size_of::<Idt>() - 1) as u16,
@@ -141,6 +235,98 @@ pub fn trigger_general_protection_fault() {
             lateout("rax") _,
             options(preserves_flags),
         );
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn hxnu_x86_64_handle_syscall_frame(frame: &mut SyscallRegisterFrame) -> u64 {
+    let abi = match decode_syscall_abi(frame.r12) {
+        Some(abi) => abi,
+        None => return (-38i64) as u64,
+    };
+    let outcome = syscall::dispatch(
+        abi,
+        frame.rax,
+        [frame.rdi, frame.rsi, frame.rdx, frame.r10, frame.r8, frame.r9],
+    );
+    match outcome.action {
+        SyscallAction::Continue => outcome.value as u64,
+        SyscallAction::ExitGroup { status } => {
+            kprintln!(
+                "HXNU: syscall exit_group deferred abi={} status={}",
+                abi.as_str(),
+                status
+            );
+            outcome.value as u64
+        }
+    }
+}
+
+pub fn run_syscall_self_test() -> SyscallSelfTest {
+    static LINUX_SMOKE: &[u8] = b"HXNU: int 0x80 linux syscall self-test\n";
+
+    let linux_write_result = invoke_syscall(
+        SyscallAbi::LinuxBootstrap,
+        syscall::LINUX_SYS_WRITE,
+        [
+            1,
+            LINUX_SMOKE.as_ptr() as u64,
+            LINUX_SMOKE.len() as u64,
+            0,
+            0,
+            0,
+        ],
+    );
+    let linux_getpid_result = invoke_syscall(SyscallAbi::LinuxBootstrap, syscall::LINUX_SYS_GETPID, [0; 6]);
+    let ghost_gettid_result = invoke_syscall(SyscallAbi::GhostBootstrap, syscall::GHOST_SYS_GETTID, [0; 6]);
+    let hxnu_abi_version_result = invoke_syscall(
+        SyscallAbi::HxnuNativeBootstrap,
+        syscall::HXNU_SYS_ABI_VERSION,
+        [0; 6],
+    );
+
+    SyscallSelfTest {
+        linux_write_result,
+        linux_getpid_result,
+        ghost_gettid_result,
+        hxnu_abi_version_result,
+    }
+}
+
+fn invoke_syscall(abi: SyscallAbi, number: u64, args: [u64; 6]) -> i64 {
+    let mut result = number;
+    unsafe {
+        asm!(
+            "int 0x80",
+            inlateout("rax") result,
+            in("r12") syscall_abi_selector(abi),
+            in("rdi") args[0],
+            in("rsi") args[1],
+            in("rdx") args[2],
+            in("r10") args[3],
+            in("r8") args[4],
+            in("r9") args[5],
+            lateout("rcx") _,
+            lateout("r11") _,
+        );
+    }
+    result as i64
+}
+
+const fn syscall_abi_selector(abi: SyscallAbi) -> u64 {
+    match abi {
+        SyscallAbi::LinuxBootstrap => 0,
+        SyscallAbi::GhostBootstrap => 1,
+        SyscallAbi::HxnuNativeBootstrap => 2,
+    }
+}
+
+const fn decode_syscall_abi(selector: u64) -> Option<SyscallAbi> {
+    match selector {
+        0 => Some(SyscallAbi::LinuxBootstrap),
+        1 => Some(SyscallAbi::GhostBootstrap),
+        2 => Some(SyscallAbi::HxnuNativeBootstrap),
+        _ => None,
     }
 }
 

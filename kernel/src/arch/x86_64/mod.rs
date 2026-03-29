@@ -15,6 +15,14 @@ pub enum ExceptionSelfTest {
     GeneralProtectionFault,
 }
 
+#[derive(Copy, Clone)]
+pub struct SyscallSelfTest {
+    pub linux_write_result: i64,
+    pub linux_getpid_result: i64,
+    pub ghost_gettid_result: i64,
+    pub hxnu_abi_version_result: i64,
+}
+
 pub use apic::{PeriodicTimer, TimerBringUp, TimerError};
 pub use context::TaskContext;
 pub use cpu::CpuInfo;
@@ -89,5 +97,15 @@ pub fn run_exception_self_test(test: ExceptionSelfTest) {
         ExceptionSelfTest::Breakpoint => interrupts::trigger_breakpoint(),
         ExceptionSelfTest::PageFault => interrupts::trigger_page_fault(),
         ExceptionSelfTest::GeneralProtectionFault => interrupts::trigger_general_protection_fault(),
+    }
+}
+
+pub fn run_syscall_self_test() -> SyscallSelfTest {
+    let result = interrupts::run_syscall_self_test();
+    SyscallSelfTest {
+        linux_write_result: result.linux_write_result,
+        linux_getpid_result: result.linux_getpid_result,
+        ghost_gettid_result: result.ghost_gettid_result,
+        hxnu_abi_version_result: result.hxnu_abi_version_result,
     }
 }

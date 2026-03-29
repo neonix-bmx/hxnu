@@ -154,6 +154,7 @@ Bootstrap note:
 - this mode should keep dispatch contracts and syscall numbers stable while treating pointer arguments as trusted kernel-side probes only
 - once user memory management is online, the same dispatch path should be moved behind strict user-pointer validation and copy helpers
 - bootstrap dispatcher can host multiple syscall personalities in parallel (`Linux`, `Ghost`, and native `HXNU`) while keeping one kernel-side execution core
+- `x86_64` bootstrap entry can use `int 0x80` with an ABI selector register and Linux-style argument registers until the final userspace ABI entry path is finalized
 
 ## Driver Loading Direction
 

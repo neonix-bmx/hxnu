@@ -24,6 +24,7 @@ mod smp;
 mod syscall;
 mod time;
 mod tty;
+mod uaccess;
 mod vfs;
 
 use alloc::boxed::Box;
@@ -767,6 +768,15 @@ pub extern "C" fn _start() -> ! {
         hxnu_probe.abi_version_result,
         yes_no(hxnu_probe.exit_group_captured),
         hxnu_probe.exit_group_status,
+    );
+    let syscall_self_test = arch::x86_64::run_syscall_self_test();
+    kprintln_style!(
+        crate::tty::ConsoleStyle::Success,
+        "HXNU: syscall entry self-test int=0x80 linux_write={} linux_getpid={} ghost_gettid={} hxnu_abi_version={:#x}",
+        syscall_self_test.linux_write_result,
+        syscall_self_test.linux_getpid_result,
+        syscall_self_test.ghost_gettid_result,
+        syscall_self_test.hxnu_abi_version_result,
     );
     if let Some(root) = vfs::preview("/", 80) {
         kprintln_style!(
