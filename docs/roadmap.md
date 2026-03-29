@@ -51,6 +51,7 @@ Current status:
 - Bootstrap `openat/ioctl/access/newfstatat/faccessat/faccessat2/readlinkat/dup/dup2/dup3/fcntl/getcwd/chdir/fchdir/read/fstat/getdents64/lseek/close` (`Linux`) and `open/ioctl/access/stat/readlink/dup/dup2/dup3/fcntl/getcwd/chdir/fchdir/read/fstat/getdents/seek/close` (`Ghost`, `HXNU`) VFS-backed syscall paths are online
 - `exit_group` syscall path is connected to scheduler thread-exit request handling
 - Scheduler-backed `getpid/getppid/gettid` identity path is online for bootstrap syscall personalities
+- Process-scoped `umask`, root-identity `getuid/getgid/geteuid/getegid`, and `set_tid_address` paths are online for Linux/Ghost/HXNU bootstrap personalities
 - Open-file table ownership is now process-scoped, and `exit_group` purges owned descriptors
 - `exit_group` now tears down the current thread-group and advances to the next runnable scheduler entry
 - Ghost and HXNU-native parent-process identity calls are online (`getppid` / `process_parent`)

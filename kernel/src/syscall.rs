@@ -35,9 +35,15 @@ pub const LINUX_SYS_FCNTL: u64 = 72;
 pub const LINUX_SYS_GETCWD: u64 = 79;
 pub const LINUX_SYS_CHDIR: u64 = 80;
 pub const LINUX_SYS_FCHDIR: u64 = 81;
+pub const LINUX_SYS_UMASK: u64 = 95;
+pub const LINUX_SYS_GETUID: u64 = 102;
+pub const LINUX_SYS_GETGID: u64 = 104;
+pub const LINUX_SYS_GETEUID: u64 = 107;
+pub const LINUX_SYS_GETEGID: u64 = 108;
 pub const LINUX_SYS_GETPPID: u64 = 110;
 pub const LINUX_SYS_GETTID: u64 = 186;
 pub const LINUX_SYS_GETDENTS64: u64 = 217;
+pub const LINUX_SYS_SET_TID_ADDRESS: u64 = 218;
 pub const LINUX_SYS_CLOCK_GETTIME: u64 = 228;
 pub const LINUX_SYS_EXIT_GROUP: u64 = 231;
 pub const LINUX_SYS_OPENAT: u64 = 257;
@@ -72,6 +78,12 @@ pub const GHOST_SYS_GETCWD: u64 = 22;
 pub const GHOST_SYS_CHDIR: u64 = 23;
 pub const GHOST_SYS_FCHDIR: u64 = 24;
 pub const GHOST_SYS_DUP2: u64 = 25;
+pub const GHOST_SYS_UMASK: u64 = 26;
+pub const GHOST_SYS_GETUID: u64 = 27;
+pub const GHOST_SYS_GETGID: u64 = 28;
+pub const GHOST_SYS_GETEUID: u64 = 29;
+pub const GHOST_SYS_GETEGID: u64 = 30;
+pub const GHOST_SYS_SET_TID_ADDRESS: u64 = 31;
 
 pub const HXNU_SYS_LOG_WRITE: u64 = 0x484e_0001;
 pub const HXNU_SYS_THREAD_SELF: u64 = 0x484e_0002;
@@ -97,6 +109,12 @@ pub const HXNU_SYS_GETCWD: u64 = 0x484e_0015;
 pub const HXNU_SYS_CHDIR: u64 = 0x484e_0016;
 pub const HXNU_SYS_FCHDIR: u64 = 0x484e_0017;
 pub const HXNU_SYS_DUP2: u64 = 0x484e_0018;
+pub const HXNU_SYS_UMASK: u64 = 0x484e_0019;
+pub const HXNU_SYS_GETUID: u64 = 0x484e_001a;
+pub const HXNU_SYS_GETGID: u64 = 0x484e_001b;
+pub const HXNU_SYS_GETEUID: u64 = 0x484e_001c;
+pub const HXNU_SYS_GETEGID: u64 = 0x484e_001d;
+pub const HXNU_SYS_SET_TID_ADDRESS: u64 = 0x484e_001e;
 pub const HXNU_SYS_EXIT_GROUP: u64 = 0x484e_00ff;
 
 const HXNU_NATIVE_ABI_VERSION: i64 = 0x0001_0000;
@@ -148,6 +166,8 @@ const MAX_WRITE_BYTES: usize = 16 * 1024;
 const MAX_READ_BYTES: usize = 64 * 1024;
 const MAX_PATH_BYTES: usize = 1024;
 const MAX_OPEN_FILES: usize = 64;
+const DEFAULT_PROCESS_UMASK: u32 = 0o022;
+const UMASK_MODE_MASK: u32 = 0o777;
 
 const EBADF: i64 = 9;
 const EIO: i64 = 5;
@@ -235,6 +255,14 @@ pub struct LinuxBootstrapProbe {
     pub getpid_result: i64,
     pub getppid_result: i64,
     pub gettid_result: i64,
+    pub umask_result: i64,
+    pub umask_restore_result: i64,
+    pub getuid_result: i64,
+    pub getgid_result: i64,
+    pub geteuid_result: i64,
+    pub getegid_result: i64,
+    pub set_tid_address_result: i64,
+    pub clear_tid_snapshot: i64,
     pub sched_yield_result: i64,
     pub clock_gettime_result: i64,
     pub clock_seconds: i64,
@@ -276,6 +304,14 @@ pub struct GhostBootstrapProbe {
     pub getpid_result: i64,
     pub getppid_result: i64,
     pub gettid_result: i64,
+    pub umask_result: i64,
+    pub umask_restore_result: i64,
+    pub getuid_result: i64,
+    pub getgid_result: i64,
+    pub geteuid_result: i64,
+    pub getegid_result: i64,
+    pub set_tid_address_result: i64,
+    pub clear_tid_snapshot: i64,
     pub yield_result: i64,
     pub uptime_result: i64,
     pub uname_result: i64,
@@ -315,6 +351,14 @@ pub struct HxnuBootstrapProbe {
     pub process_self_result: i64,
     pub process_parent_result: i64,
     pub thread_self_result: i64,
+    pub umask_result: i64,
+    pub umask_restore_result: i64,
+    pub getuid_result: i64,
+    pub getgid_result: i64,
+    pub geteuid_result: i64,
+    pub getegid_result: i64,
+    pub set_tid_address_result: i64,
+    pub clear_tid_snapshot: i64,
     pub sched_yield_result: i64,
     pub uptime_result: i64,
     pub abi_version_result: i64,
@@ -473,6 +517,48 @@ impl GlobalCwdTable {
 
 static CWD_TABLE: GlobalCwdTable = GlobalCwdTable::new();
 
+struct ProcessUmask {
+    process_id: u64,
+    mask: u32,
+}
+
+struct GlobalUmaskTable(UnsafeCell<Option<Vec<ProcessUmask>>>);
+
+unsafe impl Sync for GlobalUmaskTable {}
+
+impl GlobalUmaskTable {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<Vec<ProcessUmask>> {
+        self.0.get()
+    }
+}
+
+static UMASK_TABLE: GlobalUmaskTable = GlobalUmaskTable::new();
+
+struct ProcessClearTidAddress {
+    process_id: u64,
+    address: usize,
+}
+
+struct GlobalClearTidTable(UnsafeCell<Option<Vec<ProcessClearTidAddress>>>);
+
+unsafe impl Sync for GlobalClearTidTable {}
+
+impl GlobalClearTidTable {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<Vec<ProcessClearTidAddress>> {
+        self.0.get()
+    }
+}
+
+static CLEAR_TID_TABLE: GlobalClearTidTable = GlobalClearTidTable::new();
+
 pub fn dispatch(abi: SyscallAbi, number: u64, args: [u64; 6]) -> SyscallOutcome {
     match abi {
         SyscallAbi::LinuxBootstrap => dispatch_linux_bootstrap(number, args),
@@ -507,6 +593,10 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_GETPID => process_id(),
         LINUX_SYS_GETPPID => process_parent_id(),
         LINUX_SYS_GETTID => thread_id(),
+        LINUX_SYS_UMASK => process_umask(args),
+        LINUX_SYS_GETUID | LINUX_SYS_GETEUID => user_id(),
+        LINUX_SYS_GETGID | LINUX_SYS_GETEGID => group_id(),
+        LINUX_SYS_SET_TID_ADDRESS => set_tid_address(args),
         LINUX_SYS_CLOCK_GETTIME => linux_clock_gettime(args),
         LINUX_SYS_UNAME => linux_uname(args),
         LINUX_SYS_EXIT | LINUX_SYS_EXIT_GROUP => exit_group(args),
@@ -538,6 +628,10 @@ pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         GHOST_SYS_GETPID => process_id(),
         GHOST_SYS_GETPPID => process_parent_id(),
         GHOST_SYS_GETTID => thread_id(),
+        GHOST_SYS_UMASK => process_umask(args),
+        GHOST_SYS_GETUID | GHOST_SYS_GETEUID => user_id(),
+        GHOST_SYS_GETGID | GHOST_SYS_GETEGID => group_id(),
+        GHOST_SYS_SET_TID_ADDRESS => set_tid_address(args),
         GHOST_SYS_UPTIME_NSEC => uptime_ns(),
         GHOST_SYS_UNAME => ghost_uname(args),
         GHOST_SYS_EXIT_GROUP => exit_group(args),
@@ -568,6 +662,10 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_THREAD_SELF => thread_id(),
         HXNU_SYS_PROCESS_SELF => process_id(),
         HXNU_SYS_PROCESS_PARENT => process_parent_id(),
+        HXNU_SYS_UMASK => process_umask(args),
+        HXNU_SYS_GETUID | HXNU_SYS_GETEUID => user_id(),
+        HXNU_SYS_GETGID | HXNU_SYS_GETEGID => group_id(),
+        HXNU_SYS_SET_TID_ADDRESS => set_tid_address(args),
         HXNU_SYS_UPTIME_NSEC => uptime_ns(),
         HXNU_SYS_SCHED_YIELD => SyscallOutcome::success(0),
         HXNU_SYS_ABI_VERSION => SyscallOutcome::success(HXNU_NATIVE_ABI_VERSION),
@@ -732,6 +830,25 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     let getpid_result = dispatch(abi, LINUX_SYS_GETPID, [0; 6]).value;
     let getppid_result = dispatch(abi, LINUX_SYS_GETPPID, [0; 6]).value;
     let gettid_result = dispatch(abi, LINUX_SYS_GETTID, [0; 6]).value;
+    let umask_result = dispatch(abi, LINUX_SYS_UMASK, [0o077, 0, 0, 0, 0, 0]).value;
+    let umask_restore_value = if umask_result >= 0 {
+        umask_result as u64
+    } else {
+        DEFAULT_PROCESS_UMASK as u64
+    };
+    let umask_restore_result = dispatch(abi, LINUX_SYS_UMASK, [umask_restore_value, 0, 0, 0, 0, 0]).value;
+    let getuid_result = dispatch(abi, LINUX_SYS_GETUID, [0; 6]).value;
+    let getgid_result = dispatch(abi, LINUX_SYS_GETGID, [0; 6]).value;
+    let geteuid_result = dispatch(abi, LINUX_SYS_GETEUID, [0; 6]).value;
+    let getegid_result = dispatch(abi, LINUX_SYS_GETEGID, [0; 6]).value;
+    let mut clear_tid_slot = 0i32;
+    let set_tid_address_result = dispatch(
+        abi,
+        LINUX_SYS_SET_TID_ADDRESS,
+        [(&mut clear_tid_slot as *mut i32) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let clear_tid_snapshot = i64::from(clear_tid_slot);
     let sched_yield_result = dispatch(abi, LINUX_SYS_SCHED_YIELD, [0; 6]).value;
 
     let mut timespec = LinuxTimespec { tv_sec: 0, tv_nsec: 0 };
@@ -788,6 +905,14 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
         getpid_result,
         getppid_result,
         gettid_result,
+        umask_result,
+        umask_restore_result,
+        getuid_result,
+        getgid_result,
+        geteuid_result,
+        getegid_result,
+        set_tid_address_result,
+        clear_tid_snapshot,
         sched_yield_result,
         clock_gettime_result,
         clock_seconds: timespec.tv_sec,
@@ -927,6 +1052,25 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
     let getpid_result = dispatch(abi, GHOST_SYS_GETPID, [0; 6]).value;
     let getppid_result = dispatch(abi, GHOST_SYS_GETPPID, [0; 6]).value;
     let gettid_result = dispatch(abi, GHOST_SYS_GETTID, [0; 6]).value;
+    let umask_result = dispatch(abi, GHOST_SYS_UMASK, [0o077, 0, 0, 0, 0, 0]).value;
+    let umask_restore_value = if umask_result >= 0 {
+        umask_result as u64
+    } else {
+        DEFAULT_PROCESS_UMASK as u64
+    };
+    let umask_restore_result = dispatch(abi, GHOST_SYS_UMASK, [umask_restore_value, 0, 0, 0, 0, 0]).value;
+    let getuid_result = dispatch(abi, GHOST_SYS_GETUID, [0; 6]).value;
+    let getgid_result = dispatch(abi, GHOST_SYS_GETGID, [0; 6]).value;
+    let geteuid_result = dispatch(abi, GHOST_SYS_GETEUID, [0; 6]).value;
+    let getegid_result = dispatch(abi, GHOST_SYS_GETEGID, [0; 6]).value;
+    let mut clear_tid_slot = 0i32;
+    let set_tid_address_result = dispatch(
+        abi,
+        GHOST_SYS_SET_TID_ADDRESS,
+        [(&mut clear_tid_slot as *mut i32) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let clear_tid_snapshot = i64::from(clear_tid_slot);
     let yield_result = dispatch(abi, GHOST_SYS_YIELD, [0; 6]).value;
     let uptime_result = dispatch(abi, GHOST_SYS_UPTIME_NSEC, [0; 6]).value;
 
@@ -967,6 +1111,14 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         getpid_result,
         getppid_result,
         gettid_result,
+        umask_result,
+        umask_restore_result,
+        getuid_result,
+        getgid_result,
+        geteuid_result,
+        getegid_result,
+        set_tid_address_result,
+        clear_tid_snapshot,
         yield_result,
         uptime_result,
         uname_result,
@@ -1098,6 +1250,25 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
     let process_self_result = dispatch(abi, HXNU_SYS_PROCESS_SELF, [0; 6]).value;
     let process_parent_result = dispatch(abi, HXNU_SYS_PROCESS_PARENT, [0; 6]).value;
     let thread_self_result = dispatch(abi, HXNU_SYS_THREAD_SELF, [0; 6]).value;
+    let umask_result = dispatch(abi, HXNU_SYS_UMASK, [0o077, 0, 0, 0, 0, 0]).value;
+    let umask_restore_value = if umask_result >= 0 {
+        umask_result as u64
+    } else {
+        DEFAULT_PROCESS_UMASK as u64
+    };
+    let umask_restore_result = dispatch(abi, HXNU_SYS_UMASK, [umask_restore_value, 0, 0, 0, 0, 0]).value;
+    let getuid_result = dispatch(abi, HXNU_SYS_GETUID, [0; 6]).value;
+    let getgid_result = dispatch(abi, HXNU_SYS_GETGID, [0; 6]).value;
+    let geteuid_result = dispatch(abi, HXNU_SYS_GETEUID, [0; 6]).value;
+    let getegid_result = dispatch(abi, HXNU_SYS_GETEGID, [0; 6]).value;
+    let mut clear_tid_slot = 0i32;
+    let set_tid_address_result = dispatch(
+        abi,
+        HXNU_SYS_SET_TID_ADDRESS,
+        [(&mut clear_tid_slot as *mut i32) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let clear_tid_snapshot = i64::from(clear_tid_slot);
     let sched_yield_result = dispatch(abi, HXNU_SYS_SCHED_YIELD, [0; 6]).value;
     let uptime_result = dispatch(abi, HXNU_SYS_UPTIME_NSEC, [0; 6]).value;
     let abi_version_result = dispatch(abi, HXNU_SYS_ABI_VERSION, [0; 6]).value;
@@ -1128,6 +1299,14 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         process_self_result,
         process_parent_result,
         thread_self_result,
+        umask_result,
+        umask_restore_result,
+        getuid_result,
+        getgid_result,
+        geteuid_result,
+        getegid_result,
+        set_tid_address_result,
+        clear_tid_snapshot,
         sched_yield_result,
         uptime_result,
         abi_version_result,
@@ -1650,6 +1829,41 @@ fn thread_id() -> SyscallOutcome {
     }
 }
 
+fn process_umask(args: [u64; 6]) -> SyscallOutcome {
+    let requested = match u32::try_from(args[0]) {
+        Ok(mask) => mask & UMASK_MODE_MASK,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    let previous = set_process_umask_value(requested);
+    SyscallOutcome::success(i64::from(previous))
+}
+
+fn user_id() -> SyscallOutcome {
+    SyscallOutcome::success(0)
+}
+
+fn group_id() -> SyscallOutcome {
+    SyscallOutcome::success(0)
+}
+
+fn set_tid_address(args: [u64; 6]) -> SyscallOutcome {
+    let clear_tid_address = args[0] as usize;
+    set_process_clear_tid_address(clear_tid_address);
+
+    let tid = sched::stats().current_thread_id;
+    let tid_i32 = match i32::try_from(tid) {
+        Ok(tid) => tid,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    if clear_tid_address != 0 {
+        if let Err(error) = copyout_struct(clear_tid_address, &tid_i32) {
+            return SyscallOutcome::errno(error);
+        }
+    }
+
+    SyscallOutcome::success(i64::from(tid_i32))
+}
+
 fn uptime_ns() -> SyscallOutcome {
     let uptime = time::uptime_nanoseconds();
     match i64::try_from(uptime) {
@@ -1729,6 +1943,8 @@ fn exit_group(args: [u64; 6]) -> SyscallOutcome {
     let process_id = current_process_id_value();
     purge_open_files_for_process(process_id);
     purge_working_directory_for_process(process_id);
+    purge_process_umask(process_id);
+    purge_process_clear_tid_address(process_id);
     SyscallOutcome {
         value: 0,
         action: SyscallAction::ExitGroup { status },
@@ -1996,6 +2212,33 @@ fn set_working_directory_path(path: String) {
     }
 
     table.push(ProcessCwd { process_id, path });
+}
+
+fn set_process_umask_value(mask: u32) -> u32 {
+    let process_id = current_process_id_value();
+    let table = umask_table_mut();
+    if let Some(entry) = table.iter_mut().find(|entry| entry.process_id == process_id) {
+        let previous = entry.mask;
+        entry.mask = mask & UMASK_MODE_MASK;
+        return previous;
+    }
+
+    table.push(ProcessUmask {
+        process_id,
+        mask: mask & UMASK_MODE_MASK,
+    });
+    DEFAULT_PROCESS_UMASK
+}
+
+fn set_process_clear_tid_address(address: usize) {
+    let process_id = current_process_id_value();
+    let table = clear_tid_table_mut();
+    if let Some(entry) = table.iter_mut().find(|entry| entry.process_id == process_id) {
+        entry.address = address;
+        return;
+    }
+
+    table.push(ProcessClearTidAddress { process_id, address });
 }
 
 #[derive(Copy, Clone)]
@@ -2314,6 +2557,16 @@ fn purge_working_directory_for_process(process_id: u64) {
     table.retain(|entry| entry.process_id != process_id);
 }
 
+fn purge_process_umask(process_id: u64) {
+    let table = umask_table_mut();
+    table.retain(|entry| entry.process_id != process_id);
+}
+
+fn purge_process_clear_tid_address(process_id: u64) {
+    let table = clear_tid_table_mut();
+    table.retain(|entry| entry.process_id != process_id);
+}
+
 fn fd_table_mut() -> &'static mut FdTable {
     let slot = unsafe { &mut *FD_TABLE.get() };
     if slot.is_none() {
@@ -2328,6 +2581,22 @@ fn cwd_table_mut() -> &'static mut Vec<ProcessCwd> {
         *slot = Some(Vec::new());
     }
     slot.as_mut().expect("cwd table initialized")
+}
+
+fn umask_table_mut() -> &'static mut Vec<ProcessUmask> {
+    let slot = unsafe { &mut *UMASK_TABLE.get() };
+    if slot.is_none() {
+        *slot = Some(Vec::new());
+    }
+    slot.as_mut().expect("umask table initialized")
+}
+
+fn clear_tid_table_mut() -> &'static mut Vec<ProcessClearTidAddress> {
+    let slot = unsafe { &mut *CLEAR_TID_TABLE.get() };
+    if slot.is_none() {
+        *slot = Some(Vec::new());
+    }
+    slot.as_mut().expect("clear-tid table initialized")
 }
 
 fn copyin_c_string(ptr: usize, max_len: usize) -> Result<String, i64> {
