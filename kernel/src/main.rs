@@ -680,7 +680,7 @@ pub extern "C" fn _start() -> ! {
     match sched::bootstrap(hhdm_offset, &cpu_info) {
         Ok(state) => kprintln_style!(
             crate::tty::ConsoleStyle::Success,
-            "HXNU: scheduler bootstrap online source={} vector={:#04x} divide={} initial-count={} ticks={} threads={} runqueue={} current={}#{} role={} switches={} bootstrap-id={} idle-id={}",
+            "HXNU: scheduler bootstrap online source={} vector={:#04x} divide={} initial-count={} ticks={} threads={} runqueue={} current={}#{} pid={} ppid={} role={} switches={} bootstrap-id={} idle-id={}",
             state.source,
             state.vector,
             state.divide_value,
@@ -690,6 +690,8 @@ pub extern "C" fn _start() -> ! {
             state.runqueue_depth,
             state.current_thread_name,
             state.current_thread_id,
+            state.current_process_id,
+            state.current_parent_process_id,
             state.current_thread_role,
             state.context_switches,
             state.bootstrap_thread_id,
@@ -711,11 +713,13 @@ pub extern "C" fn _start() -> ! {
         tty_stats.lines_written,
     );
     kprintln!(
-        "HXNU: scheduler stats threads={} runqueue={} current={}#{} state={} ticks={} switches={} bootstrap-id={} idle-id={}",
+        "HXNU: scheduler stats threads={} runqueue={} current={}#{} pid={} ppid={} state={} ticks={} switches={} bootstrap-id={} idle-id={}",
         scheduler_stats.thread_count,
         scheduler_stats.runqueue_depth,
         scheduler_stats.current_thread_name,
         scheduler_stats.current_thread_id,
+        scheduler_stats.current_process_id,
+        scheduler_stats.current_parent_process_id,
         scheduler_stats.current_thread_state,
         scheduler_stats.total_ticks,
         scheduler_stats.context_switches,

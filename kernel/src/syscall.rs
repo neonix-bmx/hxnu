@@ -223,6 +223,7 @@ impl LinuxUtsName {
 
 struct OpenFile {
     fd: i32,
+    owner_process_id: u64,
     path: String,
     offset: usize,
     content: Vec<u8>,
@@ -274,7 +275,7 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_OPENAT => linux_openat(args),
         LINUX_SYS_SCHED_YIELD => SyscallOutcome::success(0),
         LINUX_SYS_GETPID => process_id(),
-        LINUX_SYS_GETPPID => SyscallOutcome::success(0),
+        LINUX_SYS_GETPPID => process_parent_id(),
         LINUX_SYS_GETTID => thread_id(),
         LINUX_SYS_CLOCK_GETTIME => linux_clock_gettime(args),
         LINUX_SYS_UNAME => linux_uname(args),
@@ -646,7 +647,18 @@ fn write_text(ptr: usize, len: u64) -> SyscallOutcome {
 }
 
 fn process_id() -> SyscallOutcome {
-    SyscallOutcome::success(1)
+    match i64::try_from(current_process_id_value()) {
+        Ok(process_id) => SyscallOutcome::success(process_id),
+        Err(_) => SyscallOutcome::errno(ERANGE),
+    }
+}
+
+fn process_parent_id() -> SyscallOutcome {
+    let parent_process_id = sched::stats().current_parent_process_id;
+    match i64::try_from(parent_process_id) {
+        Ok(parent_process_id) => SyscallOutcome::success(parent_process_id),
+        Err(_) => SyscallOutcome::errno(ERANGE),
+    }
 }
 
 fn thread_id() -> SyscallOutcome {
@@ -733,6 +745,7 @@ fn write_uname(
 
 fn exit_group(args: [u64; 6]) -> SyscallOutcome {
     let status = args[0] as i32;
+    purge_open_files_for_process(current_process_id_value());
     SyscallOutcome {
         value: 0,
         action: SyscallAction::ExitGroup { status },
@@ -765,7 +778,12 @@ fn parse_fd(value: u64) -> Result<i32, i64> {
     i32::try_from(value).map_err(|_| EBADF)
 }
 
+fn current_process_id_value() -> u64 {
+    sched::stats().current_process_id
+}
+
 fn alloc_open_file(path: String, content: Vec<u8>) -> Result<i64, i64> {
+    let owner_process_id = current_process_id_value();
     let table = fd_table_mut();
     if table.files.len() >= MAX_OPEN_FILES {
         return Err(EMFILE);
@@ -775,6 +793,7 @@ fn alloc_open_file(path: String, content: Vec<u8>) -> Result<i64, i64> {
     table.next_fd = table.next_fd.checked_add(1).ok_or(ERANGE)?;
     table.files.push(OpenFile {
         fd,
+        owner_process_id,
         path,
         offset: 0,
         content,
@@ -783,11 +802,12 @@ fn alloc_open_file(path: String, content: Vec<u8>) -> Result<i64, i64> {
 }
 
 fn read_open_file(fd: i32, destination_ptr: usize, count: usize) -> Result<i64, i64> {
+    let owner_process_id = current_process_id_value();
     let table = fd_table_mut();
     let open = table
         .files
         .iter_mut()
-        .find(|file| file.fd == fd)
+        .find(|file| file.fd == fd && file.owner_process_id == owner_process_id)
         .ok_or(EBADF)?;
     let _ = &open.path;
 
@@ -805,12 +825,22 @@ fn read_open_file(fd: i32, destination_ptr: usize, count: usize) -> Result<i64, 
 }
 
 fn close_open_file(fd: i32) -> Result<i64, i64> {
+    let owner_process_id = current_process_id_value();
     let table = fd_table_mut();
-    if let Some(position) = table.files.iter().position(|file| file.fd == fd) {
+    if let Some(position) = table
+        .files
+        .iter()
+        .position(|file| file.fd == fd && file.owner_process_id == owner_process_id)
+    {
         table.files.remove(position);
         return Ok(0);
     }
     Err(EBADF)
+}
+
+fn purge_open_files_for_process(process_id: u64) {
+    let table = fd_table_mut();
+    table.files.retain(|file| file.owner_process_id != process_id);
 }
 
 fn fd_table_mut() -> &'static mut FdTable {

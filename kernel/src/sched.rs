@@ -65,6 +65,8 @@ pub struct SchedulerBootstrap {
     pub thread_count: usize,
     pub runqueue_depth: usize,
     pub current_thread_id: u64,
+    pub current_process_id: u64,
+    pub current_parent_process_id: u64,
     pub current_thread_name: &'static str,
     pub current_thread_role: &'static str,
     pub context_switches: u64,
@@ -77,6 +79,8 @@ pub struct SchedulerStats {
     pub thread_count: usize,
     pub runqueue_depth: usize,
     pub current_thread_id: u64,
+    pub current_process_id: u64,
+    pub current_parent_process_id: u64,
     pub current_thread_name: &'static str,
     pub current_thread_role: &'static str,
     pub current_thread_state: &'static str,
@@ -91,8 +95,11 @@ pub struct ExitGroupRecord {
     pub status: i32,
     pub exited_thread_id: u64,
     pub exited_thread_name: &'static str,
+    pub exited_process_id: u64,
+    pub exited_thread_count: usize,
     pub next_thread_id: u64,
     pub next_thread_name: &'static str,
+    pub next_process_id: u64,
     pub runqueue_depth: usize,
 }
 
@@ -120,6 +127,9 @@ impl SchedulerError {
 #[derive(Copy, Clone)]
 struct Thread {
     id: u64,
+    process_id: u64,
+    parent_process_id: u64,
+    thread_group_id: u64,
     name: &'static str,
     role: ThreadRole,
     state: ThreadState,
@@ -132,6 +142,9 @@ impl Thread {
     const fn empty() -> Self {
         Self {
             id: 0,
+            process_id: 0,
+            parent_process_id: 0,
+            thread_group_id: 0,
             name: "",
             role: ThreadRole::None,
             state: ThreadState::Unused,
@@ -178,6 +191,13 @@ impl ThreadState {
     }
 }
 
+#[derive(Copy, Clone)]
+struct ProcessIdentity {
+    process_id: u64,
+    parent_process_id: u64,
+    thread_group_id: u64,
+}
+
 struct Scheduler {
     initialized: bool,
     next_thread_id: u64,
@@ -214,8 +234,24 @@ impl Scheduler {
     fn initialize_bootstrap_threads(&mut self) -> Result<(), SchedulerError> {
         self.reset();
 
-        let bootstrap_slot = self.create_thread("kernel-bootstrap", ThreadRole::Bootstrap)?;
-        let idle_slot = self.create_thread("kernel-idle", ThreadRole::Idle)?;
+        let bootstrap_slot = self.create_thread(
+            "kernel-bootstrap",
+            ThreadRole::Bootstrap,
+            ProcessIdentity {
+                process_id: 1,
+                parent_process_id: 0,
+                thread_group_id: 1,
+            },
+        )?;
+        let idle_slot = self.create_thread(
+            "kernel-idle",
+            ThreadRole::Idle,
+            ProcessIdentity {
+                process_id: 0,
+                parent_process_id: 0,
+                thread_group_id: 0,
+            },
+        )?;
         self.enqueue(bootstrap_slot)?;
         self.enqueue(idle_slot)?;
 
@@ -242,6 +278,7 @@ impl Scheduler {
         &mut self,
         name: &'static str,
         role: ThreadRole,
+        identity: ProcessIdentity,
     ) -> Result<usize, SchedulerError> {
         let slot = self.thread_count;
         if slot >= MAX_THREADS {
@@ -252,6 +289,9 @@ impl Scheduler {
         self.next_thread_id = self.next_thread_id.saturating_add(1);
         self.threads[slot] = Thread {
             id: thread_id,
+            process_id: identity.process_id,
+            parent_process_id: identity.parent_process_id,
+            thread_group_id: identity.thread_group_id,
             name,
             role,
             state: ThreadState::Runnable,
@@ -404,6 +444,8 @@ impl Scheduler {
             thread_count: self.thread_count,
             runqueue_depth: self.runqueue_depth,
             current_thread_id: current.id,
+            current_process_id: current.process_id,
+            current_parent_process_id: current.parent_process_id,
             current_thread_name: current.name,
             current_thread_role: current.role.as_str(),
             current_thread_state: current.state.as_str(),
@@ -440,29 +482,68 @@ impl Scheduler {
         if current.state == ThreadState::Exited {
             return None;
         }
+        if current.thread_group_id == 0 {
+            return None;
+        }
 
-        current.state = ThreadState::Exited;
         let exited_thread_id = current.id;
         let exited_thread_name = current.name;
-
-        self.remove_runqueue_index(current_index);
-        let (next_thread_id, next_thread_name) = if self.runqueue_depth > 0 {
-            let next_slot = self.runqueue[self.current_runqueue_index];
-            if self.threads[next_slot].state != ThreadState::Exited {
-                self.threads[next_slot].state = ThreadState::Running;
+        let exited_process_id = current.process_id;
+        let exited_group_id = current.thread_group_id;
+        let mut exited_thread_count = 0usize;
+        for slot in 0..self.thread_count {
+            if self.threads[slot].thread_group_id == exited_group_id
+                && self.threads[slot].state != ThreadState::Exited
+            {
+                self.threads[slot].state = ThreadState::Exited;
+                exited_thread_count += 1;
             }
+        }
+
+        for index in (0..self.runqueue_depth).rev() {
+            let slot = self.runqueue[index];
+            if self.threads[slot].thread_group_id == exited_group_id {
+                self.remove_runqueue_index(index);
+            }
+        }
+
+        let (next_thread_id, next_thread_name, next_process_id) = if self.runqueue_depth > 0 {
+            self.current_runqueue_index %= self.runqueue_depth;
+            let mut selected_index = self.current_runqueue_index;
+            if self.threads[self.runqueue[selected_index]].state == ThreadState::Exited {
+                let mut found = None;
+                for index in 0..self.runqueue_depth {
+                    let slot = self.runqueue[index];
+                    if self.threads[slot].state != ThreadState::Exited {
+                        found = Some(index);
+                        break;
+                    }
+                }
+                let found = found?;
+                selected_index = found;
+            }
+            self.current_runqueue_index = selected_index;
+            let next_slot = self.runqueue[selected_index];
+            self.threads[next_slot].state = ThreadState::Running;
             self.context_switches = self.context_switches.saturating_add(1);
-            (self.threads[next_slot].id, self.threads[next_slot].name)
+            (
+                self.threads[next_slot].id,
+                self.threads[next_slot].name,
+                self.threads[next_slot].process_id,
+            )
         } else {
-            (0, "<none>")
+            (0, "<none>", 0)
         };
 
         Some(ExitGroupRecord {
             status,
             exited_thread_id,
             exited_thread_name,
+            exited_process_id,
+            exited_thread_count,
             next_thread_id,
             next_thread_name,
+            next_process_id,
             runqueue_depth: self.runqueue_depth,
         })
     }
@@ -521,6 +602,8 @@ pub fn bootstrap(
         thread_count: stats.thread_count,
         runqueue_depth: stats.runqueue_depth,
         current_thread_id: stats.current_thread_id,
+        current_process_id: stats.current_process_id,
+        current_parent_process_id: stats.current_parent_process_id,
         current_thread_name: stats.current_thread_name,
         current_thread_role: stats.current_thread_role,
         context_switches: stats.context_switches,

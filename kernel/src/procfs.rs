@@ -188,6 +188,8 @@ fn render_schedstat() -> String {
     let _ = writeln!(text, "threads {}", stats.thread_count);
     let _ = writeln!(text, "runqueue {}", stats.runqueue_depth);
     let _ = writeln!(text, "current_id {}", stats.current_thread_id);
+    let _ = writeln!(text, "current_pid {}", stats.current_process_id);
+    let _ = writeln!(text, "current_ppid {}", stats.current_parent_process_id);
     let _ = writeln!(text, "current_name {}", stats.current_thread_name);
     let _ = writeln!(text, "current_role {}", stats.current_thread_role);
     let _ = writeln!(text, "current_state {}", stats.current_thread_state);

@@ -263,13 +263,16 @@ extern "C" fn hxnu_x86_64_handle_syscall_frame(frame: &mut SyscallRegisterFrame)
         SyscallAction::ExitGroup { status } => {
             if let Some(record) = crate::sched::request_exit_group(status) {
                 kprintln!(
-                    "HXNU: syscall exit_group abi={} status={} exited={}#{} next={}#{} runqueue={}",
+                    "HXNU: syscall exit_group abi={} status={} exited={}#{} pid={} threads={} next={}#{} pid={} runqueue={}",
                     abi.as_str(),
                     record.status,
                     record.exited_thread_name,
                     record.exited_thread_id,
+                    record.exited_process_id,
+                    record.exited_thread_count,
                     record.next_thread_name,
                     record.next_thread_id,
+                    record.next_process_id,
                     record.runqueue_depth,
                 );
             } else {
