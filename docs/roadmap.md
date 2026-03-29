@@ -54,6 +54,12 @@ Current status:
 - Power-reset self-test reaches the FADT reset-register path on `x86_64`
 - Broader scheduler work remains next
 
+Cross-repo status (as of 2026-03-29):
+- External compiler repository `hxnu-rustc-compiler-x86_64` is online and versioned separately
+- Rust-first SDK `v0.1.0` is tagged and includes `hxnu-rustc`, `hxnu-cargo`, `hxnu-sdk`, and `x86_64-unknown-hxnu` target spec
+- SDK bundle flow (`build`, `pack`, `install`) and ELF verification flow are automated in the compiler repository
+- Kernel integration model is consumer-style (`PATH` + `hxnu-cargo`), with no monorepo coupling
+
 ## Phase 3
 - Virtual memory manager
 - Kernel virtual address-space management
@@ -114,7 +120,7 @@ Current status:
 - Minimal userspace networking boundary
 
 ## Phase 6
-- Rust cross compiler support with `x86_64` and `aarch64` as first-class targets
+- Rust cross compiler support with `x86_64` and `aarch64` as first-class targets (`x86_64` bootstrap release is online in external compiler repo)
 - C and C++ cross compiler support with `x86_64` and `aarch64` as first-class targets
 - Additional architectures after the main two are stable
 - PPC 32-bit bring-up
@@ -150,3 +156,5 @@ Current status:
 - Rust cross compilation: `x86_64`, then `aarch64`
 - C and C++ cross compilation: `x86_64`, then `aarch64`
 - Other architectures only after the main two toolchains are reliable
+- Compiler development continues in a dedicated repository: `https://github.com/neonix-bmx/hxnu-rustc-compiler-x86_64`
+- Kernel repository tracks integration contract and acceptance checks, not compiler internals

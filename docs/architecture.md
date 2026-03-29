@@ -258,3 +258,10 @@ Cross-compilation support should be treated as a first-class part of the project
 - C and C++ cross compiler support for `x86_64` and `aarch64` first
 - other architectures only after the two main targets are reliable
 - PPC 32-bit belongs to the later expansion phase, not the initial kernel stabilization phase
+
+Repository and integration model:
+
+- compiler toolchain development is hosted in a dedicated repository (`hxnu-rustc-compiler-x86_64`)
+- kernel and compiler move independently, but with explicit compatibility contracts
+- kernel repository consumes compiler releases through SDK-style installation and `hxnu-cargo`
+- this repository should document consumer expectations, while compiler internals stay outside the kernel tree
