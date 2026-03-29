@@ -34,6 +34,7 @@ pub const LINUX_SYS_CLOCK_GETTIME: u64 = 228;
 pub const LINUX_SYS_EXIT_GROUP: u64 = 231;
 pub const LINUX_SYS_OPENAT: u64 = 257;
 pub const LINUX_SYS_NEWFSTATAT: u64 = 262;
+pub const LINUX_SYS_READLINKAT: u64 = 267;
 
 pub const GHOST_SYS_WRITE: u64 = 1;
 pub const GHOST_SYS_YIELD: u64 = 2;
@@ -50,6 +51,7 @@ pub const GHOST_SYS_GETPPID: u64 = 12;
 pub const GHOST_SYS_FSTAT: u64 = 13;
 pub const GHOST_SYS_STAT: u64 = 14;
 pub const GHOST_SYS_GETDENTS: u64 = 15;
+pub const GHOST_SYS_READLINK: u64 = 16;
 
 pub const HXNU_SYS_LOG_WRITE: u64 = 0x484e_0001;
 pub const HXNU_SYS_THREAD_SELF: u64 = 0x484e_0002;
@@ -65,6 +67,7 @@ pub const HXNU_SYS_PROCESS_PARENT: u64 = 0x484e_000b;
 pub const HXNU_SYS_FSTAT: u64 = 0x484e_000c;
 pub const HXNU_SYS_STAT: u64 = 0x484e_000d;
 pub const HXNU_SYS_GETDENTS: u64 = 0x484e_000e;
+pub const HXNU_SYS_READLINK: u64 = 0x484e_000f;
 pub const HXNU_SYS_EXIT_GROUP: u64 = 0x484e_00ff;
 
 const HXNU_NATIVE_ABI_VERSION: i64 = 0x0001_0000;
@@ -165,6 +168,7 @@ pub struct LinuxBootstrapProbe {
     pub write_result: i64,
     pub openat_result: i64,
     pub newfstatat_result: i64,
+    pub readlinkat_result: i64,
     pub read_result: i64,
     pub fstat_result: i64,
     pub getdents64_result: i64,
@@ -195,6 +199,7 @@ pub struct GhostBootstrapProbe {
     pub write_result: i64,
     pub open_result: i64,
     pub stat_result: i64,
+    pub readlink_result: i64,
     pub read_result: i64,
     pub fstat_result: i64,
     pub getdents_result: i64,
@@ -223,6 +228,7 @@ pub struct HxnuBootstrapProbe {
     pub write_result: i64,
     pub open_result: i64,
     pub stat_result: i64,
+    pub readlink_result: i64,
     pub read_result: i64,
     pub fstat_result: i64,
     pub getdents_result: i64,
@@ -376,6 +382,7 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_LSEEK => seek_fd(args),
         LINUX_SYS_OPENAT => linux_openat(args),
         LINUX_SYS_NEWFSTATAT => linux_newfstatat(args),
+        LINUX_SYS_READLINKAT => linux_readlinkat(args),
         LINUX_SYS_SCHED_YIELD => SyscallOutcome::success(0),
         LINUX_SYS_GETPID => process_id(),
         LINUX_SYS_GETPPID => process_parent_id(),
@@ -396,6 +403,7 @@ pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         GHOST_SYS_FSTAT => fstat_fd(args),
         GHOST_SYS_GETDENTS => getdents_fd(args),
         GHOST_SYS_STAT => stat_path_at(AT_FDCWD, args[0] as usize, args[1], 0),
+        GHOST_SYS_READLINK => readlink_path_at(AT_FDCWD, args[0] as usize, args[1] as usize, args[2]),
         GHOST_SYS_SEEK => seek_fd(args),
         GHOST_SYS_YIELD => SyscallOutcome::success(0),
         GHOST_SYS_GETPID => process_id(),
@@ -417,6 +425,7 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_FSTAT => fstat_fd(args),
         HXNU_SYS_GETDENTS => getdents_fd(args),
         HXNU_SYS_STAT => stat_path_at(AT_FDCWD, args[0] as usize, args[1], 0),
+        HXNU_SYS_READLINK => readlink_path_at(AT_FDCWD, args[0] as usize, args[1] as usize, args[2]),
         HXNU_SYS_SEEK => seek_fd(args),
         HXNU_SYS_THREAD_SELF => thread_id(),
         HXNU_SYS_PROCESS_SELF => process_id(),
@@ -433,6 +442,7 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     static WRITE_SMOKE: &[u8] = b"HXNU: linux syscall write() compatibility smoke\n";
     static OPEN_PATH: &[u8] = b"/proc/version\0";
     static OPEN_DIR_PATH: &[u8] = b"/proc\0";
+    static READLINK_PATH: &[u8] = b"/proc/self/exe\0";
     let abi = SyscallAbi::LinuxBootstrap;
 
     let write_result = dispatch(
@@ -464,6 +474,20 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
             OPEN_PATH.as_ptr() as u64,
             (&mut stat as *mut LinuxStat) as u64,
             0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let mut readlink_buffer = [0u8; 128];
+    let readlinkat_result = dispatch(
+        abi,
+        LINUX_SYS_READLINKAT,
+        [
+            AT_FDCWD as u64,
+            READLINK_PATH.as_ptr() as u64,
+            readlink_buffer.as_mut_ptr() as u64,
+            readlink_buffer.len() as u64,
             0,
             0,
         ],
@@ -549,6 +573,7 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
         write_result,
         openat_result,
         newfstatat_result,
+        readlinkat_result,
         read_result,
         fstat_result,
         getdents64_result,
@@ -573,6 +598,7 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
     static WRITE_SMOKE: &[u8] = b"HXNU: ghost syscall write() compatibility smoke\n";
     static OPEN_PATH: &[u8] = b"/proc/version\0";
     static OPEN_DIR_PATH: &[u8] = b"/proc\0";
+    static READLINK_PATH: &[u8] = b"/proc/self/exe\0";
     let abi = SyscallAbi::GhostBootstrap;
 
     let write_result = dispatch(
@@ -594,6 +620,20 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         abi,
         GHOST_SYS_STAT,
         [OPEN_PATH.as_ptr() as u64, (&mut stat as *mut LinuxStat) as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let mut readlink_buffer = [0u8; 128];
+    let readlink_result = dispatch(
+        abi,
+        GHOST_SYS_READLINK,
+        [
+            READLINK_PATH.as_ptr() as u64,
+            readlink_buffer.as_mut_ptr() as u64,
+            readlink_buffer.len() as u64,
+            0,
+            0,
+            0,
+        ],
     )
     .value;
 
@@ -658,6 +698,7 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         write_result,
         open_result,
         stat_result,
+        readlink_result,
         read_result,
         fstat_result,
         getdents_result,
@@ -680,6 +721,7 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
     static WRITE_SMOKE: &[u8] = b"HXNU: native syscall log_write() bootstrap smoke\n";
     static OPEN_PATH: &[u8] = b"/proc/version\0";
     static OPEN_DIR_PATH: &[u8] = b"/proc\0";
+    static READLINK_PATH: &[u8] = b"/proc/self/exe\0";
     let abi = SyscallAbi::HxnuNativeBootstrap;
 
     let write_result = dispatch(
@@ -694,6 +736,20 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         abi,
         HXNU_SYS_STAT,
         [OPEN_PATH.as_ptr() as u64, (&mut stat as *mut LinuxStat) as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let mut readlink_buffer = [0u8; 128];
+    let readlink_result = dispatch(
+        abi,
+        HXNU_SYS_READLINK,
+        [
+            READLINK_PATH.as_ptr() as u64,
+            readlink_buffer.as_mut_ptr() as u64,
+            readlink_buffer.len() as u64,
+            0,
+            0,
+            0,
+        ],
     )
     .value;
 
@@ -749,6 +805,7 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         write_result,
         open_result,
         stat_result,
+        readlink_result,
         read_result,
         fstat_result,
         getdents_result,
@@ -773,6 +830,11 @@ fn linux_openat(args: [u64; 6]) -> SyscallOutcome {
 fn linux_newfstatat(args: [u64; 6]) -> SyscallOutcome {
     let dirfd = args[0] as i64;
     stat_path_at(dirfd, args[1] as usize, args[2], args[3])
+}
+
+fn linux_readlinkat(args: [u64; 6]) -> SyscallOutcome {
+    let dirfd = args[0] as i64;
+    readlink_path_at(dirfd, args[1] as usize, args[2] as usize, args[3])
 }
 
 fn open_path_at(dirfd: i64, path_ptr: usize, flags: u64) -> SyscallOutcome {
@@ -816,23 +878,70 @@ fn stat_path_at(dirfd: i64, path_ptr: usize, stat_ptr: u64, flags: u64) -> Sysca
     SyscallOutcome::success(0)
 }
 
+fn readlink_path_at(dirfd: i64, path_ptr: usize, destination_ptr: usize, count: u64) -> SyscallOutcome {
+    let count = match usize::try_from(count) {
+        Ok(count) => count,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    if count > MAX_READ_BYTES {
+        return SyscallOutcome::errno(ERANGE);
+    }
+    if count == 0 {
+        return SyscallOutcome::success(0);
+    }
+
+    let resolved_path = match resolve_path_at(dirfd, path_ptr) {
+        Ok(path) => path,
+        Err(error) => return SyscallOutcome::errno(error),
+    };
+    let target = match readlink_target_for_path(&resolved_path) {
+        Ok(target) => target,
+        Err(error) => return SyscallOutcome::errno(error),
+    };
+    let target_bytes = target.as_bytes();
+    let copy_len = min(target_bytes.len(), count);
+    if let Err(error) = uaccess::copyout(&target_bytes[..copy_len], destination_ptr) {
+        return SyscallOutcome::errno(map_uaccess_error(error));
+    }
+
+    match i64::try_from(copy_len) {
+        Ok(copy_len) => SyscallOutcome::success(copy_len),
+        Err(_) => SyscallOutcome::errno(ERANGE),
+    }
+}
+
 fn lookup_node_at(dirfd: i64, path_ptr: usize) -> Result<vfs::VfsNode, i64> {
+    let resolved_path = resolve_path_at(dirfd, path_ptr)?;
+    vfs::lookup(&resolved_path).ok_or(ENOENT)
+}
+
+fn resolve_path_at(dirfd: i64, path_ptr: usize) -> Result<String, i64> {
     let raw_path = copyin_c_string(path_ptr, MAX_PATH_BYTES)?;
     if raw_path.is_empty() {
         return Err(EINVAL);
     }
 
-    let resolved_path = if raw_path.starts_with('/') {
-        raw_path
-    } else if dirfd == AT_FDCWD {
-        let mut absolute = String::from("/");
-        absolute.push_str(&raw_path);
-        absolute
-    } else {
+    if raw_path.starts_with('/') {
+        return Ok(raw_path);
+    }
+    if dirfd != AT_FDCWD {
         return Err(ENOSYS);
-    };
+    }
 
-    vfs::lookup(&resolved_path).ok_or(ENOENT)
+    let mut absolute = String::from("/");
+    absolute.push_str(&raw_path);
+    Ok(absolute)
+}
+
+fn readlink_target_for_path(path: &str) -> Result<String, i64> {
+    if path == "/proc/self/exe" {
+        return Ok(String::from("/initrd/init"));
+    }
+
+    if vfs::lookup(path).is_some() {
+        return Err(EINVAL);
+    }
+    Err(ENOENT)
 }
 
 fn read_from_fd(args: [u64; 6]) -> SyscallOutcome {

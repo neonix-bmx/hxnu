@@ -729,11 +729,12 @@ pub extern "C" fn _start() -> ! {
     let linux_probe = syscall::run_linux_bootstrap_probe();
     kprintln_style!(
         crate::tty::ConsoleStyle::Success,
-        "HXNU: syscall bootstrap abi={} write={} openat={} newfstatat={} read={} fstat={} getdents64={} lseek={} close={} getpid={} getppid={} gettid={} sched_yield={} clock_gettime={} monotonic={}.{:09} uname={} machine={} exit-captured={} exit-status={}",
+        "HXNU: syscall bootstrap abi={} write={} openat={} newfstatat={} readlinkat={} read={} fstat={} getdents64={} lseek={} close={} getpid={} getppid={} gettid={} sched_yield={} clock_gettime={} monotonic={}.{:09} uname={} machine={} exit-captured={} exit-status={}",
         syscall::SyscallAbi::LinuxBootstrap.as_str(),
         linux_probe.write_result,
         linux_probe.openat_result,
         linux_probe.newfstatat_result,
+        linux_probe.readlinkat_result,
         linux_probe.read_result,
         linux_probe.fstat_result,
         linux_probe.getdents64_result,
@@ -754,11 +755,12 @@ pub extern "C" fn _start() -> ! {
     let ghost_probe = syscall::run_ghost_bootstrap_probe();
     kprintln_style!(
         crate::tty::ConsoleStyle::Success,
-        "HXNU: syscall bootstrap abi={} write={} open={} stat={} read={} fstat={} getdents={} seek={} close={} getpid={} getppid={} gettid={} yield={} uptime-ns={} uname={} machine={} exit-captured={} exit-status={}",
+        "HXNU: syscall bootstrap abi={} write={} open={} stat={} readlink={} read={} fstat={} getdents={} seek={} close={} getpid={} getppid={} gettid={} yield={} uptime-ns={} uname={} machine={} exit-captured={} exit-status={}",
         syscall::SyscallAbi::GhostBootstrap.as_str(),
         ghost_probe.write_result,
         ghost_probe.open_result,
         ghost_probe.stat_result,
+        ghost_probe.readlink_result,
         ghost_probe.read_result,
         ghost_probe.fstat_result,
         ghost_probe.getdents_result,
@@ -777,11 +779,12 @@ pub extern "C" fn _start() -> ! {
     let hxnu_probe = syscall::run_hxnu_bootstrap_probe();
     kprintln_style!(
         crate::tty::ConsoleStyle::Success,
-        "HXNU: syscall bootstrap abi={} log_write={} open={} stat={} read={} fstat={} getdents={} seek={} close={} process_self={} process_parent={} thread_self={} sched_yield={} uptime-ns={} abi-version={:#x} exit-captured={} exit-status={}",
+        "HXNU: syscall bootstrap abi={} log_write={} open={} stat={} readlink={} read={} fstat={} getdents={} seek={} close={} process_self={} process_parent={} thread_self={} sched_yield={} uptime-ns={} abi-version={:#x} exit-captured={} exit-status={}",
         syscall::SyscallAbi::HxnuNativeBootstrap.as_str(),
         hxnu_probe.write_result,
         hxnu_probe.open_result,
         hxnu_probe.stat_result,
+        hxnu_probe.readlink_result,
         hxnu_probe.read_result,
         hxnu_probe.fstat_result,
         hxnu_probe.getdents_result,

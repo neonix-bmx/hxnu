@@ -48,7 +48,7 @@ Current status:
 - Partial Linux + Ghost + HXNU-native syscall compatibility dispatcher bootstrap is online on `x86_64`
 - `x86_64` `int 0x80` syscall gate, register-frame dispatch, and entry self-test are online
 - Bootstrap `uaccess` copyin/copyout validation facade is online on `x86_64`
-- Bootstrap `openat/newfstatat/read/fstat/getdents64/lseek/close` (`Linux`) and `open/stat/read/fstat/getdents/seek/close` (`Ghost`, `HXNU`) VFS-backed syscall paths are online
+- Bootstrap `openat/newfstatat/readlinkat/read/fstat/getdents64/lseek/close` (`Linux`) and `open/stat/readlink/read/fstat/getdents/seek/close` (`Ghost`, `HXNU`) VFS-backed syscall paths are online
 - `exit_group` syscall path is connected to scheduler thread-exit request handling
 - Scheduler-backed `getpid/getppid/gettid` identity path is online for bootstrap syscall personalities
 - Open-file table ownership is now process-scoped, and `exit_group` purges owned descriptors
