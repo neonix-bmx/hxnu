@@ -57,6 +57,7 @@ Current status:
 - Bootstrap `rt_sigaction/rt_sigprocmask` syscall facades are online for Linux/Ghost/HXNU personalities
 - Bootstrap `pread64/pwrite64/readv/writev` syscall facades are online for Linux/Ghost/HXNU personalities
 - Bootstrap `wait4/setpgid/getpgid/setsid/getsid` syscall facades are online for Linux/Ghost/HXNU personalities
+- Bootstrap `getrlimit/setrlimit/prlimit64` syscall facades are online for Linux/Ghost/HXNU personalities
 - Open-file table ownership is now process-scoped, and `exit_group` purges owned descriptors
 - `exit_group` now tears down the current thread-group and advances to the next runnable scheduler entry
 - Ghost and HXNU-native parent-process identity calls are online (`getppid` / `process_parent`)

@@ -50,16 +50,18 @@ pub const LINUX_SYS_GETCWD: u64 = 79;
 pub const LINUX_SYS_CHDIR: u64 = 80;
 pub const LINUX_SYS_FCHDIR: u64 = 81;
 pub const LINUX_SYS_UMASK: u64 = 95;
-pub const LINUX_SYS_SETPGID: u64 = 109;
 pub const LINUX_SYS_GETTIMEOFDAY: u64 = 96;
+pub const LINUX_SYS_GETRLIMIT: u64 = 97;
 pub const LINUX_SYS_GETUID: u64 = 102;
 pub const LINUX_SYS_GETGID: u64 = 104;
 pub const LINUX_SYS_GETEUID: u64 = 107;
 pub const LINUX_SYS_GETEGID: u64 = 108;
+pub const LINUX_SYS_SETPGID: u64 = 109;
 pub const LINUX_SYS_GETPPID: u64 = 110;
 pub const LINUX_SYS_SETSID: u64 = 112;
 pub const LINUX_SYS_GETPGID: u64 = 121;
 pub const LINUX_SYS_GETSID: u64 = 124;
+pub const LINUX_SYS_SETRLIMIT: u64 = 160;
 pub const LINUX_SYS_GETTID: u64 = 186;
 pub const LINUX_SYS_GETDENTS64: u64 = 217;
 pub const LINUX_SYS_SET_TID_ADDRESS: u64 = 218;
@@ -70,6 +72,7 @@ pub const LINUX_SYS_NEWFSTATAT: u64 = 262;
 pub const LINUX_SYS_READLINKAT: u64 = 267;
 pub const LINUX_SYS_FACCESSAT: u64 = 269;
 pub const LINUX_SYS_DUP3: u64 = 292;
+pub const LINUX_SYS_PRLIMIT64: u64 = 302;
 pub const LINUX_SYS_GETRANDOM: u64 = 318;
 pub const LINUX_SYS_FACCESSAT2: u64 = 439;
 
@@ -122,6 +125,9 @@ pub const GHOST_SYS_SETPGID: u64 = 46;
 pub const GHOST_SYS_GETPGID: u64 = 47;
 pub const GHOST_SYS_SETSID: u64 = 48;
 pub const GHOST_SYS_GETSID: u64 = 49;
+pub const GHOST_SYS_GETRLIMIT: u64 = 50;
+pub const GHOST_SYS_SETRLIMIT: u64 = 51;
+pub const GHOST_SYS_PRLIMIT64: u64 = 52;
 
 pub const HXNU_SYS_LOG_WRITE: u64 = 0x484e_0001;
 pub const HXNU_SYS_THREAD_SELF: u64 = 0x484e_0002;
@@ -171,6 +177,9 @@ pub const HXNU_SYS_SETPGID: u64 = 0x484e_002d;
 pub const HXNU_SYS_GETPGID: u64 = 0x484e_002e;
 pub const HXNU_SYS_SETSID: u64 = 0x484e_002f;
 pub const HXNU_SYS_GETSID: u64 = 0x484e_0030;
+pub const HXNU_SYS_GETRLIMIT: u64 = 0x484e_0031;
+pub const HXNU_SYS_SETRLIMIT: u64 = 0x484e_0032;
+pub const HXNU_SYS_PRLIMIT64: u64 = 0x484e_0033;
 pub const HXNU_SYS_EXIT_GROUP: u64 = 0x484e_00ff;
 
 const HXNU_NATIVE_ABI_VERSION: i64 = 0x0001_0000;
@@ -224,6 +233,23 @@ const SIGKILL: u64 = 9;
 const SIGSTOP: u64 = 19;
 const WNOHANG: i32 = 1;
 const MAX_IOVEC_COUNT: usize = 64;
+const RLIM_INFINITY: u64 = u64::MAX;
+const RLIMIT_CPU: u32 = 0;
+const RLIMIT_FSIZE: u32 = 1;
+const RLIMIT_DATA: u32 = 2;
+const RLIMIT_STACK: u32 = 3;
+const RLIMIT_CORE: u32 = 4;
+const RLIMIT_RSS: u32 = 5;
+const RLIMIT_NPROC: u32 = 6;
+const RLIMIT_NOFILE: u32 = 7;
+const RLIMIT_MEMLOCK: u32 = 8;
+const RLIMIT_AS: u32 = 9;
+const RLIMIT_LOCKS: u32 = 10;
+const RLIMIT_SIGPENDING: u32 = 11;
+const RLIMIT_MSGQUEUE: u32 = 12;
+const RLIMIT_NICE: u32 = 13;
+const RLIMIT_RTPRIO: u32 = 14;
+const RLIMIT_RTTIME: u32 = 15;
 
 const SEEK_SET: i32 = 0;
 const SEEK_CUR: i32 = 1;
@@ -253,6 +279,7 @@ const DEFAULT_PROCESS_BRK: usize = 0x4000_0000;
 const DEFAULT_PROCESS_UMASK: u32 = 0o022;
 const UMASK_MODE_MASK: u32 = 0o777;
 
+const EPERM: i64 = 1;
 const EBADF: i64 = 9;
 const EIO: i64 = 5;
 const EINVAL: i64 = 22;
@@ -346,6 +373,9 @@ pub struct LinuxBootstrapProbe {
     pub getpgid_result: i64,
     pub setsid_result: i64,
     pub getsid_result: i64,
+    pub getrlimit_result: i64,
+    pub setrlimit_result: i64,
+    pub prlimit64_result: i64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub newfstatat_result: i64,
@@ -422,6 +452,9 @@ pub struct GhostBootstrapProbe {
     pub getpgid_result: i64,
     pub setsid_result: i64,
     pub getsid_result: i64,
+    pub getrlimit_result: i64,
+    pub setrlimit_result: i64,
+    pub prlimit64_result: i64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub stat_result: i64,
@@ -494,6 +527,9 @@ pub struct HxnuBootstrapProbe {
     pub getpgid_result: i64,
     pub setsid_result: i64,
     pub getsid_result: i64,
+    pub getrlimit_result: i64,
+    pub setrlimit_result: i64,
+    pub prlimit64_result: i64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub stat_result: i64,
@@ -568,6 +604,13 @@ struct LinuxIovec {
 struct LinuxTimeval {
     tv_sec: i64,
     tv_usec: i64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct LinuxRlimit64 {
+    rlim_cur: u64,
+    rlim_max: u64,
 }
 
 #[repr(C)]
@@ -865,6 +908,28 @@ impl GlobalProcessGroupTable {
 
 static PROCESS_GROUP_TABLE: GlobalProcessGroupTable = GlobalProcessGroupTable::new();
 
+struct ProcessRlimitState {
+    process_id: u64,
+    resource: u32,
+    limits: LinuxRlimit64,
+}
+
+struct GlobalRlimitTable(UnsafeCell<Option<Vec<ProcessRlimitState>>>);
+
+unsafe impl Sync for GlobalRlimitTable {}
+
+impl GlobalRlimitTable {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<Vec<ProcessRlimitState>> {
+        self.0.get()
+    }
+}
+
+static RLIMIT_TABLE: GlobalRlimitTable = GlobalRlimitTable::new();
+
 pub fn dispatch(abi: SyscallAbi, number: u64, args: [u64; 6]) -> SyscallOutcome {
     match abi {
         SyscallAbi::LinuxBootstrap => dispatch_linux_bootstrap(number, args),
@@ -915,6 +980,9 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_GETPGID => process_getpgid(args),
         LINUX_SYS_SETSID => process_setsid(),
         LINUX_SYS_GETSID => process_getsid(args),
+        LINUX_SYS_GETRLIMIT => process_getrlimit(args),
+        LINUX_SYS_SETRLIMIT => process_setrlimit(args),
+        LINUX_SYS_PRLIMIT64 => process_prlimit64(args),
         LINUX_SYS_UMASK => process_umask(args),
         LINUX_SYS_GETUID | LINUX_SYS_GETEUID => user_id(),
         LINUX_SYS_GETGID | LINUX_SYS_GETEGID => group_id(),
@@ -968,6 +1036,9 @@ pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         GHOST_SYS_GETPGID => process_getpgid(args),
         GHOST_SYS_SETSID => process_setsid(),
         GHOST_SYS_GETSID => process_getsid(args),
+        GHOST_SYS_GETRLIMIT => process_getrlimit(args),
+        GHOST_SYS_SETRLIMIT => process_setrlimit(args),
+        GHOST_SYS_PRLIMIT64 => process_prlimit64(args),
         GHOST_SYS_UMASK => process_umask(args),
         GHOST_SYS_GETUID | GHOST_SYS_GETEUID => user_id(),
         GHOST_SYS_GETGID | GHOST_SYS_GETEGID => group_id(),
@@ -1020,6 +1091,9 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_GETPGID => process_getpgid(args),
         HXNU_SYS_SETSID => process_setsid(),
         HXNU_SYS_GETSID => process_getsid(args),
+        HXNU_SYS_GETRLIMIT => process_getrlimit(args),
+        HXNU_SYS_SETRLIMIT => process_setrlimit(args),
+        HXNU_SYS_PRLIMIT64 => process_prlimit64(args),
         HXNU_SYS_UMASK => process_umask(args),
         HXNU_SYS_GETUID | HXNU_SYS_GETEUID => user_id(),
         HXNU_SYS_GETGID | HXNU_SYS_GETEGID => group_id(),
@@ -1176,6 +1250,53 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     let getpgid_result = dispatch(abi, LINUX_SYS_GETPGID, [0, 0, 0, 0, 0, 0]).value;
     let setsid_result = dispatch(abi, LINUX_SYS_SETSID, [0, 0, 0, 0, 0, 0]).value;
     let getsid_result = dispatch(abi, LINUX_SYS_GETSID, [0, 0, 0, 0, 0, 0]).value;
+    let mut nofile_limit = LinuxRlimit64 {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let getrlimit_result = dispatch(
+        abi,
+        LINUX_SYS_GETRLIMIT,
+        [
+            RLIMIT_NOFILE as u64,
+            (&mut nofile_limit as *mut LinuxRlimit64) as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let setrlimit_result = dispatch(
+        abi,
+        LINUX_SYS_SETRLIMIT,
+        [
+            RLIMIT_NOFILE as u64,
+            (&nofile_limit as *const LinuxRlimit64) as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let mut prlimit_old = LinuxRlimit64 {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let prlimit64_result = dispatch(
+        abi,
+        LINUX_SYS_PRLIMIT64,
+        [
+            0,
+            RLIMIT_NOFILE as u64,
+            0,
+            (&mut prlimit_old as *mut LinuxRlimit64) as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
     let writev_iov = [
         LinuxIovec {
             iov_base: WRITEV_SMOKE_A.as_ptr() as u64,
@@ -1428,6 +1549,9 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
         getpgid_result,
         setsid_result,
         getsid_result,
+        getrlimit_result,
+        setrlimit_result,
+        prlimit64_result,
         pread64_result,
         pwrite64_result,
         readv_result,
@@ -1610,6 +1734,53 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
     let getpgid_result = dispatch(abi, GHOST_SYS_GETPGID, [0, 0, 0, 0, 0, 0]).value;
     let setsid_result = dispatch(abi, GHOST_SYS_SETSID, [0, 0, 0, 0, 0, 0]).value;
     let getsid_result = dispatch(abi, GHOST_SYS_GETSID, [0, 0, 0, 0, 0, 0]).value;
+    let mut nofile_limit = LinuxRlimit64 {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let getrlimit_result = dispatch(
+        abi,
+        GHOST_SYS_GETRLIMIT,
+        [
+            RLIMIT_NOFILE as u64,
+            (&mut nofile_limit as *mut LinuxRlimit64) as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let setrlimit_result = dispatch(
+        abi,
+        GHOST_SYS_SETRLIMIT,
+        [
+            RLIMIT_NOFILE as u64,
+            (&nofile_limit as *const LinuxRlimit64) as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let mut prlimit_old = LinuxRlimit64 {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let prlimit64_result = dispatch(
+        abi,
+        GHOST_SYS_PRLIMIT64,
+        [
+            0,
+            RLIMIT_NOFILE as u64,
+            0,
+            (&mut prlimit_old as *mut LinuxRlimit64) as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
     let writev_iov = [
         LinuxIovec {
             iov_base: WRITEV_SMOKE_A.as_ptr() as u64,
@@ -1825,6 +1996,9 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         getpgid_result,
         setsid_result,
         getsid_result,
+        getrlimit_result,
+        setrlimit_result,
+        prlimit64_result,
         pread64_result,
         pwrite64_result,
         readv_result,
@@ -1996,6 +2170,53 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
     let getpgid_result = dispatch(abi, HXNU_SYS_GETPGID, [0, 0, 0, 0, 0, 0]).value;
     let setsid_result = dispatch(abi, HXNU_SYS_SETSID, [0, 0, 0, 0, 0, 0]).value;
     let getsid_result = dispatch(abi, HXNU_SYS_GETSID, [0, 0, 0, 0, 0, 0]).value;
+    let mut nofile_limit = LinuxRlimit64 {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let getrlimit_result = dispatch(
+        abi,
+        HXNU_SYS_GETRLIMIT,
+        [
+            RLIMIT_NOFILE as u64,
+            (&mut nofile_limit as *mut LinuxRlimit64) as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let setrlimit_result = dispatch(
+        abi,
+        HXNU_SYS_SETRLIMIT,
+        [
+            RLIMIT_NOFILE as u64,
+            (&nofile_limit as *const LinuxRlimit64) as u64,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let mut prlimit_old = LinuxRlimit64 {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    let prlimit64_result = dispatch(
+        abi,
+        HXNU_SYS_PRLIMIT64,
+        [
+            0,
+            RLIMIT_NOFILE as u64,
+            0,
+            (&mut prlimit_old as *mut LinuxRlimit64) as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
     let writev_iov = [
         LinuxIovec {
             iov_base: WRITEV_SMOKE_A.as_ptr() as u64,
@@ -2202,6 +2423,9 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         getpgid_result,
         setsid_result,
         getsid_result,
+        getrlimit_result,
+        setrlimit_result,
+        prlimit64_result,
         pread64_result,
         pwrite64_result,
         readv_result,
@@ -2508,6 +2732,89 @@ fn process_getsid(args: [u64; 6]) -> SyscallOutcome {
         Ok(value) => SyscallOutcome::success(value),
         Err(_) => SyscallOutcome::errno(ERANGE),
     }
+}
+
+fn process_getrlimit(args: [u64; 6]) -> SyscallOutcome {
+    let resource = match u32::try_from(args[0]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    let limit_ptr = args[1] as usize;
+    if limit_ptr == 0 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    let limit = match current_process_rlimit(resource) {
+        Some(limit) => limit,
+        None => return SyscallOutcome::errno(EINVAL),
+    };
+    if let Err(error) = copyout_struct(limit_ptr, &limit) {
+        return SyscallOutcome::errno(error);
+    }
+
+    SyscallOutcome::success(0)
+}
+
+fn process_setrlimit(args: [u64; 6]) -> SyscallOutcome {
+    let resource = match u32::try_from(args[0]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    let new_limit_ptr = args[1] as usize;
+    if new_limit_ptr == 0 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    let next_limit = match copyin_rlimit(new_limit_ptr) {
+        Ok(limit) => limit,
+        Err(error) => return SyscallOutcome::errno(error),
+    };
+    if let Err(error) = validate_rlimit_update(resource, next_limit) {
+        return SyscallOutcome::errno(error);
+    }
+    set_process_rlimit(resource, next_limit);
+    SyscallOutcome::success(0)
+}
+
+fn process_prlimit64(args: [u64; 6]) -> SyscallOutcome {
+    let pid = args[0] as i64;
+    let resource = match u32::try_from(args[1]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    let new_limit_ptr = args[2] as usize;
+    let old_limit_ptr = args[3] as usize;
+
+    let current_pid = match i64::try_from(current_process_id_value()) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    if pid != 0 && pid != current_pid {
+        return SyscallOutcome::errno(ESRCH);
+    }
+
+    let current_limit = match current_process_rlimit(resource) {
+        Some(limit) => limit,
+        None => return SyscallOutcome::errno(EINVAL),
+    };
+    if old_limit_ptr != 0 {
+        if let Err(error) = copyout_struct(old_limit_ptr, &current_limit) {
+            return SyscallOutcome::errno(error);
+        }
+    }
+    if new_limit_ptr == 0 {
+        return SyscallOutcome::success(0);
+    }
+
+    let next_limit = match copyin_rlimit(new_limit_ptr) {
+        Ok(limit) => limit,
+        Err(error) => return SyscallOutcome::errno(error),
+    };
+    if let Err(error) = validate_rlimit_update(resource, next_limit) {
+        return SyscallOutcome::errno(error);
+    }
+    set_process_rlimit(resource, next_limit);
+    SyscallOutcome::success(0)
 }
 
 fn process_rt_sigprocmask(args: [u64; 6]) -> SyscallOutcome {
@@ -3371,6 +3678,7 @@ fn exit_group(args: [u64; 6]) -> SyscallOutcome {
     purge_process_mappings(process_id);
     purge_process_brk(process_id);
     purge_process_group_state(process_id);
+    purge_process_rlimits(process_id);
     purge_process_signal_mask(process_id);
     purge_process_signal_actions(process_id);
     SyscallOutcome {
@@ -3755,6 +4063,93 @@ fn set_session_and_group_id(session_id: u64, process_group_id: u64) {
         process_id,
         process_group_id,
         session_id,
+    });
+}
+
+fn default_rlimit_for_resource(resource: u32) -> Option<LinuxRlimit64> {
+    match resource {
+        RLIMIT_CPU
+        | RLIMIT_FSIZE
+        | RLIMIT_DATA
+        | RLIMIT_CORE
+        | RLIMIT_RSS
+        | RLIMIT_NPROC
+        | RLIMIT_MEMLOCK
+        | RLIMIT_AS
+        | RLIMIT_LOCKS
+        | RLIMIT_SIGPENDING
+        | RLIMIT_MSGQUEUE
+        | RLIMIT_NICE
+        | RLIMIT_RTPRIO
+        | RLIMIT_RTTIME => Some(LinuxRlimit64 {
+            rlim_cur: RLIM_INFINITY,
+            rlim_max: RLIM_INFINITY,
+        }),
+        RLIMIT_STACK => Some(LinuxRlimit64 {
+            rlim_cur: 8 * 1024 * 1024,
+            rlim_max: 8 * 1024 * 1024,
+        }),
+        RLIMIT_NOFILE => {
+            let limit = MAX_OPEN_FILES as u64;
+            Some(LinuxRlimit64 {
+                rlim_cur: limit,
+                rlim_max: limit,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn current_process_rlimit(resource: u32) -> Option<LinuxRlimit64> {
+    let default = default_rlimit_for_resource(resource)?;
+    let process_id = current_process_id_value();
+    let table = rlimit_table_mut();
+    if let Some(entry) = table
+        .iter()
+        .find(|entry| entry.process_id == process_id && entry.resource == resource)
+    {
+        return Some(entry.limits);
+    }
+
+    table.push(ProcessRlimitState {
+        process_id,
+        resource,
+        limits: default,
+    });
+    Some(default)
+}
+
+fn validate_rlimit_update(resource: u32, limit: LinuxRlimit64) -> Result<(), i64> {
+    if limit.rlim_cur > limit.rlim_max {
+        return Err(EINVAL);
+    }
+    if default_rlimit_for_resource(resource).is_none() {
+        return Err(EINVAL);
+    }
+    if resource == RLIMIT_NOFILE {
+        let upper_bound = MAX_OPEN_FILES as u64;
+        if limit.rlim_cur > upper_bound || limit.rlim_max > upper_bound {
+            return Err(EPERM);
+        }
+    }
+    Ok(())
+}
+
+fn set_process_rlimit(resource: u32, limits: LinuxRlimit64) {
+    let process_id = current_process_id_value();
+    let table = rlimit_table_mut();
+    if let Some(entry) = table
+        .iter_mut()
+        .find(|entry| entry.process_id == process_id && entry.resource == resource)
+    {
+        entry.limits = limits;
+        return;
+    }
+
+    table.push(ProcessRlimitState {
+        process_id,
+        resource,
+        limits,
     });
 }
 
@@ -4260,6 +4655,11 @@ fn purge_process_group_state(process_id: u64) {
     table.retain(|entry| entry.process_id != process_id);
 }
 
+fn purge_process_rlimits(process_id: u64) {
+    let table = rlimit_table_mut();
+    table.retain(|entry| entry.process_id != process_id);
+}
+
 fn purge_process_signal_mask(process_id: u64) {
     let table = signal_mask_table_mut();
     table.retain(|entry| entry.process_id != process_id);
@@ -4326,6 +4726,14 @@ fn process_group_table_mut() -> &'static mut Vec<ProcessGroupState> {
     slot.as_mut().expect("process group table initialized")
 }
 
+fn rlimit_table_mut() -> &'static mut Vec<ProcessRlimitState> {
+    let slot = unsafe { &mut *RLIMIT_TABLE.get() };
+    if slot.is_none() {
+        *slot = Some(Vec::new());
+    }
+    slot.as_mut().expect("rlimit table initialized")
+}
+
 fn signal_mask_table_mut() -> &'static mut Vec<ProcessSignalMask> {
     let slot = unsafe { &mut *SIGNAL_MASK_TABLE.get() };
     if slot.is_none() {
@@ -4389,6 +4797,17 @@ fn copyin_sigaction(ptr: usize) -> Result<LinuxKernelSigAction, i64> {
         restorer,
         mask,
     })
+}
+
+fn copyin_rlimit(ptr: usize) -> Result<LinuxRlimit64, i64> {
+    let bytes = copyin_bytes(ptr, size_of::<LinuxRlimit64>())?;
+    if bytes.len() != size_of::<LinuxRlimit64>() {
+        return Err(EINVAL);
+    }
+
+    let rlim_cur = u64::from_le_bytes(bytes[0..8].try_into().map_err(|_| EINVAL)?);
+    let rlim_max = u64::from_le_bytes(bytes[8..16].try_into().map_err(|_| EINVAL)?);
+    Ok(LinuxRlimit64 { rlim_cur, rlim_max })
 }
 
 fn copyin_iovec_at(iov_ptr: usize, index: usize) -> Result<LinuxIovec, i64> {
