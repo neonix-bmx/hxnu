@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::cell::UnsafeCell;
 use core::cmp::min;
-use core::mem::size_of_val;
+use core::mem::{size_of, size_of_val};
 use core::slice;
 use core::str;
 
@@ -28,6 +28,8 @@ pub const LINUX_SYS_MMAP: u64 = 9;
 pub const LINUX_SYS_MPROTECT: u64 = 10;
 pub const LINUX_SYS_MUNMAP: u64 = 11;
 pub const LINUX_SYS_BRK: u64 = 12;
+pub const LINUX_SYS_RT_SIGACTION: u64 = 13;
+pub const LINUX_SYS_RT_SIGPROCMASK: u64 = 14;
 pub const LINUX_SYS_NANOSLEEP: u64 = 35;
 pub const LINUX_SYS_LSEEK: u64 = 8;
 pub const LINUX_SYS_IOCTL: u64 = 16;
@@ -100,6 +102,8 @@ pub const GHOST_SYS_BRK: u64 = 35;
 pub const GHOST_SYS_NANOSLEEP: u64 = 36;
 pub const GHOST_SYS_GETTIMEOFDAY: u64 = 37;
 pub const GHOST_SYS_GETRANDOM: u64 = 38;
+pub const GHOST_SYS_RT_SIGACTION: u64 = 39;
+pub const GHOST_SYS_RT_SIGPROCMASK: u64 = 40;
 
 pub const HXNU_SYS_LOG_WRITE: u64 = 0x484e_0001;
 pub const HXNU_SYS_THREAD_SELF: u64 = 0x484e_0002;
@@ -138,6 +142,8 @@ pub const HXNU_SYS_BRK: u64 = 0x484e_0022;
 pub const HXNU_SYS_NANOSLEEP: u64 = 0x484e_0023;
 pub const HXNU_SYS_GETTIMEOFDAY: u64 = 0x484e_0024;
 pub const HXNU_SYS_GETRANDOM: u64 = 0x484e_0025;
+pub const HXNU_SYS_RT_SIGACTION: u64 = 0x484e_0026;
+pub const HXNU_SYS_RT_SIGPROCMASK: u64 = 0x484e_0027;
 pub const HXNU_SYS_EXIT_GROUP: u64 = 0x484e_00ff;
 
 const HXNU_NATIVE_ABI_VERSION: i64 = 0x0001_0000;
@@ -181,6 +187,14 @@ const GRND_NONBLOCK: u64 = 0x0001;
 const GRND_RANDOM: u64 = 0x0002;
 const GRND_INSECURE: u64 = 0x0004;
 const GRND_MASK: u64 = GRND_NONBLOCK | GRND_RANDOM | GRND_INSECURE;
+
+const RT_SIGSET_SIZE: usize = 8;
+const SIG_BLOCK: i32 = 0;
+const SIG_UNBLOCK: i32 = 1;
+const SIG_SETMASK: i32 = 2;
+const MAX_SIGNAL_NUMBER: u64 = 64;
+const SIGKILL: u64 = 9;
+const SIGSTOP: u64 = 19;
 
 const SEEK_SET: i32 = 0;
 const SEEK_CUR: i32 = 1;
@@ -287,6 +301,10 @@ pub struct LinuxBootstrapProbe {
     pub gettimeofday_microseconds: i64,
     pub getrandom_result: i64,
     pub getrandom_sample: u64,
+    pub rt_sigaction_result: i64,
+    pub rt_sigprocmask_result: i64,
+    pub rt_sigmask_snapshot: u64,
+    pub rt_sigold_handler: u64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub newfstatat_result: i64,
@@ -350,6 +368,10 @@ pub struct GhostBootstrapProbe {
     pub gettimeofday_microseconds: i64,
     pub getrandom_result: i64,
     pub getrandom_sample: u64,
+    pub rt_sigaction_result: i64,
+    pub rt_sigprocmask_result: i64,
+    pub rt_sigmask_snapshot: u64,
+    pub rt_sigold_handler: u64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub stat_result: i64,
@@ -409,6 +431,10 @@ pub struct HxnuBootstrapProbe {
     pub gettimeofday_microseconds: i64,
     pub getrandom_result: i64,
     pub getrandom_sample: u64,
+    pub rt_sigaction_result: i64,
+    pub rt_sigprocmask_result: i64,
+    pub rt_sigmask_snapshot: u64,
+    pub rt_sigold_handler: u64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub stat_result: i64,
@@ -449,6 +475,26 @@ pub struct HxnuBootstrapProbe {
 struct LinuxTimespec {
     tv_sec: i64,
     tv_nsec: i64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct LinuxKernelSigAction {
+    handler: u64,
+    flags: u64,
+    restorer: u64,
+    mask: u64,
+}
+
+impl LinuxKernelSigAction {
+    const fn empty() -> Self {
+        Self {
+            handler: 0,
+            flags: 0,
+            restorer: 0,
+            mask: 0,
+        }
+    }
 }
 
 #[repr(C)]
@@ -688,6 +734,49 @@ impl GlobalBrkTable {
 
 static BRK_TABLE: GlobalBrkTable = GlobalBrkTable::new();
 
+struct ProcessSignalMask {
+    process_id: u64,
+    mask: u64,
+}
+
+struct GlobalSignalMaskTable(UnsafeCell<Option<Vec<ProcessSignalMask>>>);
+
+unsafe impl Sync for GlobalSignalMaskTable {}
+
+impl GlobalSignalMaskTable {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<Vec<ProcessSignalMask>> {
+        self.0.get()
+    }
+}
+
+static SIGNAL_MASK_TABLE: GlobalSignalMaskTable = GlobalSignalMaskTable::new();
+
+struct ProcessSignalAction {
+    process_id: u64,
+    signum: u8,
+    action: LinuxKernelSigAction,
+}
+
+struct GlobalSignalActionTable(UnsafeCell<Option<Vec<ProcessSignalAction>>>);
+
+unsafe impl Sync for GlobalSignalActionTable {}
+
+impl GlobalSignalActionTable {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<Vec<ProcessSignalAction>> {
+        self.0.get()
+    }
+}
+
+static SIGNAL_ACTION_TABLE: GlobalSignalActionTable = GlobalSignalActionTable::new();
+
 pub fn dispatch(abi: SyscallAbi, number: u64, args: [u64; 6]) -> SyscallOutcome {
     match abi {
         SyscallAbi::LinuxBootstrap => dispatch_linux_bootstrap(number, args),
@@ -707,6 +796,8 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_MPROTECT => process_mprotect(args),
         LINUX_SYS_MUNMAP => process_munmap(args),
         LINUX_SYS_BRK => process_brk(args),
+        LINUX_SYS_RT_SIGACTION => process_rt_sigaction(args),
+        LINUX_SYS_RT_SIGPROCMASK => process_rt_sigprocmask(args),
         LINUX_SYS_NANOSLEEP => process_nanosleep(args),
         LINUX_SYS_GETDENTS64 => getdents_fd(args),
         LINUX_SYS_IOCTL => ioctl_fd(args),
@@ -750,6 +841,8 @@ pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         GHOST_SYS_MPROTECT => process_mprotect(args),
         GHOST_SYS_MUNMAP => process_munmap(args),
         GHOST_SYS_BRK => process_brk(args),
+        GHOST_SYS_RT_SIGACTION => process_rt_sigaction(args),
+        GHOST_SYS_RT_SIGPROCMASK => process_rt_sigprocmask(args),
         GHOST_SYS_NANOSLEEP => process_nanosleep(args),
         GHOST_SYS_DUP => dup_fd(args),
         GHOST_SYS_DUP2 => dup2_fd(args),
@@ -792,6 +885,8 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_MPROTECT => process_mprotect(args),
         HXNU_SYS_MUNMAP => process_munmap(args),
         HXNU_SYS_BRK => process_brk(args),
+        HXNU_SYS_RT_SIGACTION => process_rt_sigaction(args),
+        HXNU_SYS_RT_SIGPROCMASK => process_rt_sigprocmask(args),
         HXNU_SYS_NANOSLEEP => process_nanosleep(args),
         HXNU_SYS_DUP => dup_fd(args),
         HXNU_SYS_DUP2 => dup2_fd(args),
@@ -922,6 +1017,43 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     )
     .value;
     let getrandom_sample = sample_random_u64(&random_buffer);
+    let signal_set = 1u64 << 1;
+    let mut previous_signal_mask = 0u64;
+    let rt_sigprocmask_result = dispatch(
+        abi,
+        LINUX_SYS_RT_SIGPROCMASK,
+        [
+            SIG_BLOCK as u64,
+            (&signal_set as *const u64) as u64,
+            (&mut previous_signal_mask as *mut u64) as u64,
+            RT_SIGSET_SIZE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let action = LinuxKernelSigAction {
+        handler: 0x10,
+        flags: 0,
+        restorer: 0,
+        mask: 0,
+    };
+    let mut old_action = LinuxKernelSigAction::empty();
+    let rt_sigaction_result = dispatch(
+        abi,
+        LINUX_SYS_RT_SIGACTION,
+        [
+            10,
+            (&action as *const LinuxKernelSigAction) as u64,
+            (&mut old_action as *mut LinuxKernelSigAction) as u64,
+            RT_SIGSET_SIZE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rt_sigmask_snapshot = previous_signal_mask;
+    let rt_sigold_handler = old_action.handler;
     let mut winsize = LinuxWinsize {
         ws_row: 0,
         ws_col: 0,
@@ -1115,6 +1247,10 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
         gettimeofday_microseconds: timeval.tv_usec,
         getrandom_result,
         getrandom_sample,
+        rt_sigaction_result,
+        rt_sigprocmask_result,
+        rt_sigmask_snapshot,
+        rt_sigold_handler,
         ioctl_result,
         access_result,
         newfstatat_result,
@@ -1249,6 +1385,43 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
     )
     .value;
     let getrandom_sample = sample_random_u64(&random_buffer);
+    let signal_set = 1u64 << 1;
+    let mut previous_signal_mask = 0u64;
+    let rt_sigprocmask_result = dispatch(
+        abi,
+        GHOST_SYS_RT_SIGPROCMASK,
+        [
+            SIG_BLOCK as u64,
+            (&signal_set as *const u64) as u64,
+            (&mut previous_signal_mask as *mut u64) as u64,
+            RT_SIGSET_SIZE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let action = LinuxKernelSigAction {
+        handler: 0x10,
+        flags: 0,
+        restorer: 0,
+        mask: 0,
+    };
+    let mut old_action = LinuxKernelSigAction::empty();
+    let rt_sigaction_result = dispatch(
+        abi,
+        GHOST_SYS_RT_SIGACTION,
+        [
+            10,
+            (&action as *const LinuxKernelSigAction) as u64,
+            (&mut old_action as *mut LinuxKernelSigAction) as u64,
+            RT_SIGSET_SIZE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rt_sigmask_snapshot = previous_signal_mask;
+    let rt_sigold_handler = old_action.handler;
     let mut winsize = LinuxWinsize {
         ws_row: 0,
         ws_col: 0,
@@ -1405,6 +1578,10 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         gettimeofday_microseconds: timeval.tv_usec,
         getrandom_result,
         getrandom_sample,
+        rt_sigaction_result,
+        rt_sigprocmask_result,
+        rt_sigmask_snapshot,
+        rt_sigold_handler,
         ioctl_result,
         access_result,
         stat_result,
@@ -1528,6 +1705,43 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
     )
     .value;
     let getrandom_sample = sample_random_u64(&random_buffer);
+    let signal_set = 1u64 << 1;
+    let mut previous_signal_mask = 0u64;
+    let rt_sigprocmask_result = dispatch(
+        abi,
+        HXNU_SYS_RT_SIGPROCMASK,
+        [
+            SIG_BLOCK as u64,
+            (&signal_set as *const u64) as u64,
+            (&mut previous_signal_mask as *mut u64) as u64,
+            RT_SIGSET_SIZE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let action = LinuxKernelSigAction {
+        handler: 0x10,
+        flags: 0,
+        restorer: 0,
+        mask: 0,
+    };
+    let mut old_action = LinuxKernelSigAction::empty();
+    let rt_sigaction_result = dispatch(
+        abi,
+        HXNU_SYS_RT_SIGACTION,
+        [
+            10,
+            (&action as *const LinuxKernelSigAction) as u64,
+            (&mut old_action as *mut LinuxKernelSigAction) as u64,
+            RT_SIGSET_SIZE as u64,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let rt_sigmask_snapshot = previous_signal_mask;
+    let rt_sigold_handler = old_action.handler;
     let mut winsize = LinuxWinsize {
         ws_row: 0,
         ws_col: 0,
@@ -1675,6 +1889,10 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         gettimeofday_microseconds: timeval.tv_usec,
         getrandom_result,
         getrandom_sample,
+        rt_sigaction_result,
+        rt_sigprocmask_result,
+        rt_sigmask_snapshot,
+        rt_sigold_handler,
         ioctl_result,
         access_result,
         stat_result,
@@ -1881,6 +2099,82 @@ fn process_brk(args: [u64; 6]) -> SyscallOutcome {
     }
     set_process_brk(requested);
     to_address_outcome(requested)
+}
+
+fn process_rt_sigprocmask(args: [u64; 6]) -> SyscallOutcome {
+    let how = match i32::try_from(args[0]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(EINVAL),
+    };
+    let set_ptr = args[1] as usize;
+    let oldset_ptr = args[2] as usize;
+    let sigset_size = match usize::try_from(args[3]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    if sigset_size != RT_SIGSET_SIZE {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    let current = current_process_signal_mask();
+    if oldset_ptr != 0 {
+        if let Err(error) = copyout_struct(oldset_ptr, &current) {
+            return SyscallOutcome::errno(error);
+        }
+    }
+    if set_ptr == 0 {
+        return SyscallOutcome::success(0);
+    }
+
+    let set = match copyin_sigset(set_ptr, sigset_size) {
+        Ok(mask) => mask,
+        Err(error) => return SyscallOutcome::errno(error),
+    };
+    let next = match how {
+        SIG_BLOCK => current | set,
+        SIG_UNBLOCK => current & !set,
+        SIG_SETMASK => set,
+        _ => return SyscallOutcome::errno(EINVAL),
+    };
+    set_process_signal_mask(next);
+
+    SyscallOutcome::success(0)
+}
+
+fn process_rt_sigaction(args: [u64; 6]) -> SyscallOutcome {
+    let signum = args[0];
+    if signum == 0 || signum > MAX_SIGNAL_NUMBER {
+        return SyscallOutcome::errno(EINVAL);
+    }
+    let sigset_size = match usize::try_from(args[3]) {
+        Ok(value) => value,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    if sigset_size != RT_SIGSET_SIZE {
+        return SyscallOutcome::errno(EINVAL);
+    }
+    let new_action_ptr = args[1] as usize;
+    let old_action_ptr = args[2] as usize;
+
+    if old_action_ptr != 0 {
+        let current = current_signal_action(signum as u8);
+        if let Err(error) = copyout_struct(old_action_ptr, &current) {
+            return SyscallOutcome::errno(error);
+        }
+    }
+    if new_action_ptr == 0 {
+        return SyscallOutcome::success(0);
+    }
+    if signum == SIGKILL || signum == SIGSTOP {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    let action = match copyin_sigaction(new_action_ptr) {
+        Ok(action) => action,
+        Err(error) => return SyscallOutcome::errno(error),
+    };
+    set_signal_action(signum as u8, action);
+    SyscallOutcome::success(0)
 }
 
 fn process_nanosleep(args: [u64; 6]) -> SyscallOutcome {
@@ -2502,6 +2796,8 @@ fn exit_group(args: [u64; 6]) -> SyscallOutcome {
     purge_process_clear_tid_address(process_id);
     purge_process_mappings(process_id);
     purge_process_brk(process_id);
+    purge_process_signal_mask(process_id);
+    purge_process_signal_actions(process_id);
     SyscallOutcome {
         value: 0,
         action: SyscallAction::ExitGroup { status },
@@ -2823,6 +3119,59 @@ fn set_process_brk(current_break: usize) {
     table.push(ProcessBrkState {
         process_id,
         current_break,
+    });
+}
+
+fn current_process_signal_mask() -> u64 {
+    let process_id = current_process_id_value();
+    let table = signal_mask_table_mut();
+    if let Some(entry) = table.iter().find(|entry| entry.process_id == process_id) {
+        return entry.mask;
+    }
+
+    table.push(ProcessSignalMask {
+        process_id,
+        mask: 0,
+    });
+    0
+}
+
+fn set_process_signal_mask(mask: u64) {
+    let process_id = current_process_id_value();
+    let table = signal_mask_table_mut();
+    if let Some(entry) = table.iter_mut().find(|entry| entry.process_id == process_id) {
+        entry.mask = mask;
+        return;
+    }
+
+    table.push(ProcessSignalMask { process_id, mask });
+}
+
+fn current_signal_action(signum: u8) -> LinuxKernelSigAction {
+    let process_id = current_process_id_value();
+    let table = signal_action_table_mut();
+    table
+        .iter()
+        .find(|entry| entry.process_id == process_id && entry.signum == signum)
+        .map(|entry| entry.action)
+        .unwrap_or_else(LinuxKernelSigAction::empty)
+}
+
+fn set_signal_action(signum: u8, action: LinuxKernelSigAction) {
+    let process_id = current_process_id_value();
+    let table = signal_action_table_mut();
+    if let Some(entry) = table
+        .iter_mut()
+        .find(|entry| entry.process_id == process_id && entry.signum == signum)
+    {
+        entry.action = action;
+        return;
+    }
+
+    table.push(ProcessSignalAction {
+        process_id,
+        signum,
+        action,
     });
 }
 
@@ -3246,6 +3595,16 @@ fn purge_process_brk(process_id: u64) {
     table.retain(|entry| entry.process_id != process_id);
 }
 
+fn purge_process_signal_mask(process_id: u64) {
+    let table = signal_mask_table_mut();
+    table.retain(|entry| entry.process_id != process_id);
+}
+
+fn purge_process_signal_actions(process_id: u64) {
+    let table = signal_action_table_mut();
+    table.retain(|entry| entry.process_id != process_id);
+}
+
 fn fd_table_mut() -> &'static mut FdTable {
     let slot = unsafe { &mut *FD_TABLE.get() };
     if slot.is_none() {
@@ -3294,6 +3653,22 @@ fn brk_table_mut() -> &'static mut Vec<ProcessBrkState> {
     slot.as_mut().expect("brk table initialized")
 }
 
+fn signal_mask_table_mut() -> &'static mut Vec<ProcessSignalMask> {
+    let slot = unsafe { &mut *SIGNAL_MASK_TABLE.get() };
+    if slot.is_none() {
+        *slot = Some(Vec::new());
+    }
+    slot.as_mut().expect("signal mask table initialized")
+}
+
+fn signal_action_table_mut() -> &'static mut Vec<ProcessSignalAction> {
+    let slot = unsafe { &mut *SIGNAL_ACTION_TABLE.get() };
+    if slot.is_none() {
+        *slot = Some(Vec::new());
+    }
+    slot.as_mut().expect("signal action table initialized")
+}
+
 fn copyin_c_string(ptr: usize, max_len: usize) -> Result<String, i64> {
     let mut bytes = Vec::new();
     for index in 0..max_len {
@@ -3314,6 +3689,33 @@ fn copyin_bytes(ptr: usize, len: usize) -> Result<Vec<u8>, i64> {
     let mut bytes = vec![0u8; len];
     uaccess::copyin(ptr, &mut bytes).map_err(map_uaccess_error)?;
     Ok(bytes)
+}
+
+fn copyin_sigset(ptr: usize, sigset_size: usize) -> Result<u64, i64> {
+    let bytes = copyin_bytes(ptr, sigset_size)?;
+    let mut value = 0u64;
+    for (index, byte) in bytes.iter().copied().enumerate().take(RT_SIGSET_SIZE) {
+        value |= u64::from(byte) << (index * 8);
+    }
+    Ok(value)
+}
+
+fn copyin_sigaction(ptr: usize) -> Result<LinuxKernelSigAction, i64> {
+    let bytes = copyin_bytes(ptr, size_of::<LinuxKernelSigAction>())?;
+    if bytes.len() != size_of::<LinuxKernelSigAction>() {
+        return Err(EINVAL);
+    }
+
+    let handler = u64::from_le_bytes(bytes[0..8].try_into().map_err(|_| EINVAL)?);
+    let flags = u64::from_le_bytes(bytes[8..16].try_into().map_err(|_| EINVAL)?);
+    let restorer = u64::from_le_bytes(bytes[16..24].try_into().map_err(|_| EINVAL)?);
+    let mask = u64::from_le_bytes(bytes[24..32].try_into().map_err(|_| EINVAL)?);
+    Ok(LinuxKernelSigAction {
+        handler,
+        flags,
+        restorer,
+        mask,
+    })
 }
 
 fn copyout_struct<T: Copy>(ptr: usize, value: &T) -> Result<(), i64> {
