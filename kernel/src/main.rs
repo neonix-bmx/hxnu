@@ -725,7 +725,7 @@ pub extern "C" fn _start() -> ! {
     kprintln_style!(
         crate::tty::ConsoleStyle::Success,
         "HXNU: syscall bootstrap abi={} write={} getpid={} getppid={} gettid={} sched_yield={} clock_gettime={} monotonic={}.{:09} uname={} machine={} exit-captured={} exit-status={}",
-        syscall::LINUX_ABI_NAME,
+        syscall::SyscallAbi::LinuxBootstrap.as_str(),
         linux_probe.write_result,
         linux_probe.getpid_result,
         linux_probe.getppid_result,
@@ -738,6 +738,35 @@ pub extern "C" fn _start() -> ! {
         linux_probe.machine_str(),
         yes_no(linux_probe.exit_group_captured),
         linux_probe.exit_group_status,
+    );
+    let ghost_probe = syscall::run_ghost_bootstrap_probe();
+    kprintln_style!(
+        crate::tty::ConsoleStyle::Success,
+        "HXNU: syscall bootstrap abi={} write={} getpid={} gettid={} yield={} uptime-ns={} uname={} machine={} exit-captured={} exit-status={}",
+        syscall::SyscallAbi::GhostBootstrap.as_str(),
+        ghost_probe.write_result,
+        ghost_probe.getpid_result,
+        ghost_probe.gettid_result,
+        ghost_probe.yield_result,
+        ghost_probe.uptime_result,
+        ghost_probe.uname_result,
+        ghost_probe.machine_str(),
+        yes_no(ghost_probe.exit_group_captured),
+        ghost_probe.exit_group_status,
+    );
+    let hxnu_probe = syscall::run_hxnu_bootstrap_probe();
+    kprintln_style!(
+        crate::tty::ConsoleStyle::Success,
+        "HXNU: syscall bootstrap abi={} log_write={} process_self={} thread_self={} sched_yield={} uptime-ns={} abi-version={:#x} exit-captured={} exit-status={}",
+        syscall::SyscallAbi::HxnuNativeBootstrap.as_str(),
+        hxnu_probe.write_result,
+        hxnu_probe.process_self_result,
+        hxnu_probe.thread_self_result,
+        hxnu_probe.sched_yield_result,
+        hxnu_probe.uptime_result,
+        hxnu_probe.abi_version_result,
+        yes_no(hxnu_probe.exit_group_captured),
+        hxnu_probe.exit_group_status,
     );
     if let Some(root) = vfs::preview("/", 80) {
         kprintln_style!(

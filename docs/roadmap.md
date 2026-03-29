@@ -45,7 +45,7 @@ Current status:
 - `/initrd/init` ELF64 header and program-header inspection skeleton is online on `x86_64`
 - `/initrd/init` ELF `PT_LOAD` vm-map planning with RWX and BSS accounting is online on `x86_64`
 - Early Unix-like shebang interpreter fallback from `/bin/*` to `/initrd/bin/*` is online on `x86_64`
-- Partial Linux `x86_64` syscall compatibility dispatcher bootstrap is online on `x86_64`
+- Partial Linux + Ghost + HXNU-native syscall compatibility dispatcher bootstrap is online on `x86_64`
 - Multiple virtual TTY screen foundation is online on `x86_64`
 - Scheduler thread table and runqueue skeleton are online on `x86_64`
 - Bootstrap to idle-thread context switching is online on `x86_64`

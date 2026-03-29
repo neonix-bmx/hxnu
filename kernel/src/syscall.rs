@@ -9,6 +9,8 @@ use crate::time;
 use crate::tty;
 
 pub const LINUX_ABI_NAME: &str = "linux-x86_64-bootstrap";
+pub const GHOST_ABI_NAME: &str = "ghost-bootstrap";
+pub const HXNU_ABI_NAME: &str = "hxnu-native-bootstrap";
 
 pub const LINUX_SYS_WRITE: u64 = 1;
 pub const LINUX_SYS_SCHED_YIELD: u64 = 24;
@@ -19,6 +21,24 @@ pub const LINUX_SYS_GETPPID: u64 = 110;
 pub const LINUX_SYS_GETTID: u64 = 186;
 pub const LINUX_SYS_CLOCK_GETTIME: u64 = 228;
 pub const LINUX_SYS_EXIT_GROUP: u64 = 231;
+
+pub const GHOST_SYS_WRITE: u64 = 1;
+pub const GHOST_SYS_YIELD: u64 = 2;
+pub const GHOST_SYS_GETPID: u64 = 3;
+pub const GHOST_SYS_GETTID: u64 = 4;
+pub const GHOST_SYS_UPTIME_NSEC: u64 = 5;
+pub const GHOST_SYS_UNAME: u64 = 6;
+pub const GHOST_SYS_EXIT_GROUP: u64 = 7;
+
+pub const HXNU_SYS_LOG_WRITE: u64 = 0x484e_0001;
+pub const HXNU_SYS_THREAD_SELF: u64 = 0x484e_0002;
+pub const HXNU_SYS_PROCESS_SELF: u64 = 0x484e_0003;
+pub const HXNU_SYS_UPTIME_NSEC: u64 = 0x484e_0004;
+pub const HXNU_SYS_SCHED_YIELD: u64 = 0x484e_0005;
+pub const HXNU_SYS_ABI_VERSION: u64 = 0x484e_0006;
+pub const HXNU_SYS_EXIT_GROUP: u64 = 0x484e_00ff;
+
+const HXNU_NATIVE_ABI_VERSION: i64 = 0x0001_0000;
 
 const LINUX_CLOCK_REALTIME: i32 = 0;
 const LINUX_CLOCK_MONOTONIC: i32 = 1;
@@ -36,6 +56,23 @@ const STDERR_FD: u64 = 2;
 
 const LOW_CANONICAL_MAX: usize = (1usize << 47) - 1;
 const HIGH_CANONICAL_MIN: usize = !LOW_CANONICAL_MAX;
+
+#[derive(Copy, Clone)]
+pub enum SyscallAbi {
+    LinuxBootstrap,
+    GhostBootstrap,
+    HxnuNativeBootstrap,
+}
+
+impl SyscallAbi {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LinuxBootstrap => LINUX_ABI_NAME,
+            Self::GhostBootstrap => GHOST_ABI_NAME,
+            Self::HxnuNativeBootstrap => HXNU_ABI_NAME,
+        }
+    }
+}
 
 #[derive(Copy, Clone)]
 pub enum SyscallAction {
@@ -84,11 +121,40 @@ pub struct LinuxBootstrapProbe {
 
 impl LinuxBootstrapProbe {
     pub fn machine_str(&self) -> &str {
-        match str::from_utf8(&self.machine_bytes[..self.machine_len]) {
-            Ok(machine) => machine,
-            Err(_) => "<invalid>",
-        }
+        machine_str(&self.machine_bytes, self.machine_len)
     }
+}
+
+#[derive(Copy, Clone)]
+pub struct GhostBootstrapProbe {
+    pub write_result: i64,
+    pub getpid_result: i64,
+    pub gettid_result: i64,
+    pub yield_result: i64,
+    pub uptime_result: i64,
+    pub uname_result: i64,
+    pub exit_group_captured: bool,
+    pub exit_group_status: i32,
+    machine_bytes: [u8; 16],
+    machine_len: usize,
+}
+
+impl GhostBootstrapProbe {
+    pub fn machine_str(&self) -> &str {
+        machine_str(&self.machine_bytes, self.machine_len)
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct HxnuBootstrapProbe {
+    pub write_result: i64,
+    pub process_self_result: i64,
+    pub thread_self_result: i64,
+    pub sched_yield_result: i64,
+    pub uptime_result: i64,
+    pub abi_version_result: i64,
+    pub exit_group_captured: bool,
+    pub exit_group_status: i32,
 }
 
 #[repr(C)]
@@ -122,24 +188,60 @@ impl LinuxUtsName {
     }
 }
 
+pub fn dispatch(abi: SyscallAbi, number: u64, args: [u64; 6]) -> SyscallOutcome {
+    match abi {
+        SyscallAbi::LinuxBootstrap => dispatch_linux_bootstrap(number, args),
+        SyscallAbi::GhostBootstrap => dispatch_ghost_bootstrap(number, args),
+        SyscallAbi::HxnuNativeBootstrap => dispatch_hxnu_bootstrap(number, args),
+    }
+}
+
 pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
     match number {
-        LINUX_SYS_WRITE => linux_write(args),
+        LINUX_SYS_WRITE => write_with_fd(args),
         LINUX_SYS_SCHED_YIELD => SyscallOutcome::success(0),
-        LINUX_SYS_GETPID => SyscallOutcome::success(1),
+        LINUX_SYS_GETPID => process_id(),
         LINUX_SYS_GETPPID => SyscallOutcome::success(0),
-        LINUX_SYS_GETTID => linux_gettid(),
+        LINUX_SYS_GETTID => thread_id(),
         LINUX_SYS_CLOCK_GETTIME => linux_clock_gettime(args),
         LINUX_SYS_UNAME => linux_uname(args),
-        LINUX_SYS_EXIT | LINUX_SYS_EXIT_GROUP => linux_exit_group(args),
+        LINUX_SYS_EXIT | LINUX_SYS_EXIT_GROUP => exit_group(args),
+        _ => SyscallOutcome::errno(ENOSYS),
+    }
+}
+
+pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
+    match number {
+        GHOST_SYS_WRITE => write_with_fd(args),
+        GHOST_SYS_YIELD => SyscallOutcome::success(0),
+        GHOST_SYS_GETPID => process_id(),
+        GHOST_SYS_GETTID => thread_id(),
+        GHOST_SYS_UPTIME_NSEC => uptime_ns(),
+        GHOST_SYS_UNAME => ghost_uname(args),
+        GHOST_SYS_EXIT_GROUP => exit_group(args),
+        _ => SyscallOutcome::errno(ENOSYS),
+    }
+}
+
+pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
+    match number {
+        HXNU_SYS_LOG_WRITE => write_without_fd(args),
+        HXNU_SYS_THREAD_SELF => thread_id(),
+        HXNU_SYS_PROCESS_SELF => process_id(),
+        HXNU_SYS_UPTIME_NSEC => uptime_ns(),
+        HXNU_SYS_SCHED_YIELD => SyscallOutcome::success(0),
+        HXNU_SYS_ABI_VERSION => SyscallOutcome::success(HXNU_NATIVE_ABI_VERSION),
+        HXNU_SYS_EXIT_GROUP => exit_group(args),
         _ => SyscallOutcome::errno(ENOSYS),
     }
 }
 
 pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     static WRITE_SMOKE: &[u8] = b"HXNU: linux syscall write() compatibility smoke\n";
+    let abi = SyscallAbi::LinuxBootstrap;
 
-    let write_result = dispatch_linux_bootstrap(
+    let write_result = dispatch(
+        abi,
         LINUX_SYS_WRITE,
         [
             STDOUT_FD,
@@ -152,13 +254,14 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     )
     .value;
 
-    let getpid_result = dispatch_linux_bootstrap(LINUX_SYS_GETPID, [0; 6]).value;
-    let getppid_result = dispatch_linux_bootstrap(LINUX_SYS_GETPPID, [0; 6]).value;
-    let gettid_result = dispatch_linux_bootstrap(LINUX_SYS_GETTID, [0; 6]).value;
-    let sched_yield_result = dispatch_linux_bootstrap(LINUX_SYS_SCHED_YIELD, [0; 6]).value;
+    let getpid_result = dispatch(abi, LINUX_SYS_GETPID, [0; 6]).value;
+    let getppid_result = dispatch(abi, LINUX_SYS_GETPPID, [0; 6]).value;
+    let gettid_result = dispatch(abi, LINUX_SYS_GETTID, [0; 6]).value;
+    let sched_yield_result = dispatch(abi, LINUX_SYS_SCHED_YIELD, [0; 6]).value;
 
     let mut timespec = LinuxTimespec { tv_sec: 0, tv_nsec: 0 };
-    let clock_gettime_result = dispatch_linux_bootstrap(
+    let clock_gettime_result = dispatch(
+        abi,
         LINUX_SYS_CLOCK_GETTIME,
         [
             LINUX_CLOCK_MONOTONIC as u64,
@@ -172,17 +275,15 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     .value;
 
     let mut utsname = LinuxUtsName::new();
-    let uname_result = dispatch_linux_bootstrap(
+    let uname_result = dispatch(
+        abi,
         LINUX_SYS_UNAME,
         [(&mut utsname as *mut LinuxUtsName) as u64, 0, 0, 0, 0, 0],
     )
     .value;
 
-    let exit_group = dispatch_linux_bootstrap(LINUX_SYS_EXIT_GROUP, [17, 0, 0, 0, 0, 0]);
-    let (exit_group_captured, exit_group_status) = match exit_group.action {
-        SyscallAction::ExitGroup { status } => (true, status),
-        SyscallAction::Continue => (false, 0),
-    };
+    let exit_group = dispatch(abi, LINUX_SYS_EXIT_GROUP, [17, 0, 0, 0, 0, 0]);
+    let (exit_group_captured, exit_group_status) = exit_status(exit_group);
 
     let mut machine_bytes = [0u8; 16];
     let machine_len = copy_c_field_prefix(&mut machine_bytes, &utsname.machine);
@@ -204,13 +305,102 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
     }
 }
 
-fn linux_write(args: [u64; 6]) -> SyscallOutcome {
+pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
+    static WRITE_SMOKE: &[u8] = b"HXNU: ghost syscall write() compatibility smoke\n";
+    let abi = SyscallAbi::GhostBootstrap;
+
+    let write_result = dispatch(
+        abi,
+        GHOST_SYS_WRITE,
+        [
+            STDERR_FD,
+            WRITE_SMOKE.as_ptr() as u64,
+            WRITE_SMOKE.len() as u64,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let getpid_result = dispatch(abi, GHOST_SYS_GETPID, [0; 6]).value;
+    let gettid_result = dispatch(abi, GHOST_SYS_GETTID, [0; 6]).value;
+    let yield_result = dispatch(abi, GHOST_SYS_YIELD, [0; 6]).value;
+    let uptime_result = dispatch(abi, GHOST_SYS_UPTIME_NSEC, [0; 6]).value;
+
+    let mut utsname = LinuxUtsName::new();
+    let uname_result = dispatch(
+        abi,
+        GHOST_SYS_UNAME,
+        [(&mut utsname as *mut LinuxUtsName) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+
+    let exit_group = dispatch(abi, GHOST_SYS_EXIT_GROUP, [19, 0, 0, 0, 0, 0]);
+    let (exit_group_captured, exit_group_status) = exit_status(exit_group);
+
+    let mut machine_bytes = [0u8; 16];
+    let machine_len = copy_c_field_prefix(&mut machine_bytes, &utsname.machine);
+
+    GhostBootstrapProbe {
+        write_result,
+        getpid_result,
+        gettid_result,
+        yield_result,
+        uptime_result,
+        uname_result,
+        exit_group_captured,
+        exit_group_status,
+        machine_bytes,
+        machine_len,
+    }
+}
+
+pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
+    static WRITE_SMOKE: &[u8] = b"HXNU: native syscall log_write() bootstrap smoke\n";
+    let abi = SyscallAbi::HxnuNativeBootstrap;
+
+    let write_result = dispatch(
+        abi,
+        HXNU_SYS_LOG_WRITE,
+        [WRITE_SMOKE.as_ptr() as u64, WRITE_SMOKE.len() as u64, 0, 0, 0, 0],
+    )
+    .value;
+    let process_self_result = dispatch(abi, HXNU_SYS_PROCESS_SELF, [0; 6]).value;
+    let thread_self_result = dispatch(abi, HXNU_SYS_THREAD_SELF, [0; 6]).value;
+    let sched_yield_result = dispatch(abi, HXNU_SYS_SCHED_YIELD, [0; 6]).value;
+    let uptime_result = dispatch(abi, HXNU_SYS_UPTIME_NSEC, [0; 6]).value;
+    let abi_version_result = dispatch(abi, HXNU_SYS_ABI_VERSION, [0; 6]).value;
+
+    let exit_group = dispatch(abi, HXNU_SYS_EXIT_GROUP, [23, 0, 0, 0, 0, 0]);
+    let (exit_group_captured, exit_group_status) = exit_status(exit_group);
+
+    HxnuBootstrapProbe {
+        write_result,
+        process_self_result,
+        thread_self_result,
+        sched_yield_result,
+        uptime_result,
+        abi_version_result,
+        exit_group_captured,
+        exit_group_status,
+    }
+}
+
+fn write_with_fd(args: [u64; 6]) -> SyscallOutcome {
     let fd = args[0];
     if fd != STDOUT_FD && fd != STDERR_FD {
         return SyscallOutcome::errno(EBADF);
     }
 
-    let count = match usize::try_from(args[2]) {
+    write_text(args[1] as usize, args[2])
+}
+
+fn write_without_fd(args: [u64; 6]) -> SyscallOutcome {
+    write_text(args[0] as usize, args[1])
+}
+
+fn write_text(ptr: usize, len: u64) -> SyscallOutcome {
+    let count = match usize::try_from(len) {
         Ok(count) => count,
         Err(_) => return SyscallOutcome::errno(ERANGE),
     };
@@ -221,13 +411,10 @@ fn linux_write(args: [u64; 6]) -> SyscallOutcome {
         return SyscallOutcome::success(0);
     }
 
-    let ptr = args[1] as usize;
-    let source = match trusted_const_ptr::<u8>(ptr) {
+    let bytes = match trusted_const_slice(ptr, count) {
+        Ok(bytes) => bytes,
         Err(error) => return SyscallOutcome::errno(error),
-        Ok(source) => source,
     };
-    // Bootstrap mode: this path currently trusts that pointers refer to kernel-mapped memory.
-    let bytes = unsafe { slice::from_raw_parts(source, count) };
 
     let text = sanitize_for_console(bytes);
     tty::write_str(&text);
@@ -238,10 +425,22 @@ fn linux_write(args: [u64; 6]) -> SyscallOutcome {
     }
 }
 
-fn linux_gettid() -> SyscallOutcome {
+fn process_id() -> SyscallOutcome {
+    SyscallOutcome::success(1)
+}
+
+fn thread_id() -> SyscallOutcome {
     let tid = sched::stats().current_thread_id;
     match i64::try_from(tid) {
         Ok(tid) => SyscallOutcome::success(tid),
+        Err(_) => SyscallOutcome::errno(ERANGE),
+    }
+}
+
+fn uptime_ns() -> SyscallOutcome {
+    let uptime = time::uptime_nanoseconds();
+    match i64::try_from(uptime) {
+        Ok(uptime) => SyscallOutcome::success(uptime),
         Err(_) => SyscallOutcome::errno(ERANGE),
     }
 }
@@ -271,19 +470,50 @@ fn linux_clock_gettime(args: [u64; 6]) -> SyscallOutcome {
 }
 
 fn linux_uname(args: [u64; 6]) -> SyscallOutcome {
-    let ptr = args[0] as usize;
+    write_uname(
+        args[0] as usize,
+        "Linux",
+        "hxnu",
+        "0.1.0-hxnu",
+        "HXNU micro-hybrid kernel bootstrap",
+        "x86_64",
+        "localdomain",
+    )
+}
+
+fn ghost_uname(args: [u64; 6]) -> SyscallOutcome {
+    write_uname(
+        args[0] as usize,
+        "Ghost",
+        "hxnu",
+        "0.1.0-ghost",
+        "HXNU ghost compatibility bootstrap",
+        "x86_64",
+        "legacy",
+    )
+}
+
+fn write_uname(
+    ptr: usize,
+    sysname: &str,
+    nodename: &str,
+    release: &str,
+    version: &str,
+    machine: &str,
+    domainname: &str,
+) -> SyscallOutcome {
     let destination = match trusted_mut_ptr::<LinuxUtsName>(ptr) {
         Ok(destination) => destination,
         Err(error) => return SyscallOutcome::errno(error),
     };
 
     let mut uts = LinuxUtsName::new();
-    write_uts_field(&mut uts.sysname, "Linux");
-    write_uts_field(&mut uts.nodename, "hxnu");
-    write_uts_field(&mut uts.release, "0.1.0-hxnu");
-    write_uts_field(&mut uts.version, "HXNU micro-hybrid kernel bootstrap");
-    write_uts_field(&mut uts.machine, "x86_64");
-    write_uts_field(&mut uts.domainname, "localdomain");
+    write_uts_field(&mut uts.sysname, sysname);
+    write_uts_field(&mut uts.nodename, nodename);
+    write_uts_field(&mut uts.release, release);
+    write_uts_field(&mut uts.version, version);
+    write_uts_field(&mut uts.machine, machine);
+    write_uts_field(&mut uts.domainname, domainname);
     unsafe {
         destination.write(uts);
     }
@@ -291,11 +521,18 @@ fn linux_uname(args: [u64; 6]) -> SyscallOutcome {
     SyscallOutcome::success(0)
 }
 
-fn linux_exit_group(args: [u64; 6]) -> SyscallOutcome {
+fn exit_group(args: [u64; 6]) -> SyscallOutcome {
     let status = args[0] as i32;
     SyscallOutcome {
         value: 0,
         action: SyscallAction::ExitGroup { status },
+    }
+}
+
+fn exit_status(outcome: SyscallOutcome) -> (bool, i32) {
+    match outcome.action {
+        SyscallAction::ExitGroup { status } => (true, status),
+        SyscallAction::Continue => (false, 0),
     }
 }
 
@@ -310,9 +547,11 @@ fn sanitize_for_console(bytes: &[u8]) -> String {
     text
 }
 
-fn trusted_const_ptr<T>(ptr: usize) -> Result<*const T, i64> {
-    validate_address_range(ptr, size_of::<T>())?;
-    Ok(ptr as *const T)
+fn trusted_const_slice(ptr: usize, len: usize) -> Result<&'static [u8], i64> {
+    validate_address_range(ptr, len)?;
+    let source = ptr as *const u8;
+    // Bootstrap mode: pointers are expected to reference kernel-mapped buffers.
+    Ok(unsafe { slice::from_raw_parts(source, len) })
 }
 
 fn trusted_mut_ptr<T>(ptr: usize) -> Result<*mut T, i64> {
@@ -358,4 +597,11 @@ fn copy_c_field_prefix(output: &mut [u8], field: &[u8; 65]) -> usize {
         length += 1;
     }
     length
+}
+
+fn machine_str(machine_bytes: &[u8], machine_len: usize) -> &str {
+    match str::from_utf8(&machine_bytes[..machine_len]) {
+        Ok(machine) => machine,
+        Err(_) => "<invalid>",
+    }
 }

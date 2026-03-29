@@ -153,6 +153,7 @@ Bootstrap note:
 - before user virtual address-space and copyin/copyout are fully online, syscall compatibility can start in a constrained bootstrap mode
 - this mode should keep dispatch contracts and syscall numbers stable while treating pointer arguments as trusted kernel-side probes only
 - once user memory management is online, the same dispatch path should be moved behind strict user-pointer validation and copy helpers
+- bootstrap dispatcher can host multiple syscall personalities in parallel (`Linux`, `Ghost`, and native `HXNU`) while keeping one kernel-side execution core
 
 ## Driver Loading Direction
 
