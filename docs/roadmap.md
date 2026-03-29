@@ -48,6 +48,8 @@ Current status:
 - Partial Linux + Ghost + HXNU-native syscall compatibility dispatcher bootstrap is online on `x86_64`
 - `x86_64` `int 0x80` syscall gate, register-frame dispatch, and entry self-test are online
 - Bootstrap `uaccess` copyin/copyout validation facade is online on `x86_64`
+- Bootstrap `openat/read/close` (`Linux`) and `open/read/close` (`Ghost`, `HXNU`) VFS-backed syscall paths are online
+- `exit_group` syscall path is connected to scheduler thread-exit request handling
 - Multiple virtual TTY screen foundation is online on `x86_64`
 - Scheduler thread table and runqueue skeleton are online on `x86_64`
 - Bootstrap to idle-thread context switching is online on `x86_64`

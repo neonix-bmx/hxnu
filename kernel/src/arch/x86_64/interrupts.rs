@@ -83,8 +83,17 @@ struct SyscallRegisterFrame {
 #[derive(Copy, Clone)]
 pub struct SyscallSelfTest {
     pub linux_write_result: i64,
+    pub linux_openat_result: i64,
+    pub linux_read_result: i64,
+    pub linux_close_result: i64,
     pub linux_getpid_result: i64,
+    pub ghost_open_result: i64,
+    pub ghost_read_result: i64,
+    pub ghost_close_result: i64,
     pub ghost_gettid_result: i64,
+    pub hxnu_open_result: i64,
+    pub hxnu_read_result: i64,
+    pub hxnu_close_result: i64,
     pub hxnu_abi_version_result: i64,
 }
 
@@ -252,11 +261,24 @@ extern "C" fn hxnu_x86_64_handle_syscall_frame(frame: &mut SyscallRegisterFrame)
     match outcome.action {
         SyscallAction::Continue => outcome.value as u64,
         SyscallAction::ExitGroup { status } => {
-            kprintln!(
-                "HXNU: syscall exit_group deferred abi={} status={}",
-                abi.as_str(),
-                status
-            );
+            if let Some(record) = crate::sched::request_exit_group(status) {
+                kprintln!(
+                    "HXNU: syscall exit_group abi={} status={} exited={}#{} next={}#{} runqueue={}",
+                    abi.as_str(),
+                    record.status,
+                    record.exited_thread_name,
+                    record.exited_thread_id,
+                    record.next_thread_name,
+                    record.next_thread_id,
+                    record.runqueue_depth,
+                );
+            } else {
+                kprintln!(
+                    "HXNU: syscall exit_group abi={} status={} scheduler=unavailable",
+                    abi.as_str(),
+                    status
+                );
+            }
             outcome.value as u64
         }
     }
@@ -264,6 +286,7 @@ extern "C" fn hxnu_x86_64_handle_syscall_frame(frame: &mut SyscallRegisterFrame)
 
 pub fn run_syscall_self_test() -> SyscallSelfTest {
     static LINUX_SMOKE: &[u8] = b"HXNU: int 0x80 linux syscall self-test\n";
+    static OPEN_PATH: &[u8] = b"/proc/version\0";
 
     let linux_write_result = invoke_syscall(
         SyscallAbi::LinuxBootstrap,
@@ -277,8 +300,86 @@ pub fn run_syscall_self_test() -> SyscallSelfTest {
             0,
         ],
     );
+    let linux_openat_result = invoke_syscall(
+        SyscallAbi::LinuxBootstrap,
+        syscall::LINUX_SYS_OPENAT,
+        [(-100i64) as u64, OPEN_PATH.as_ptr() as u64, 0, 0, 0, 0],
+    );
+    let mut linux_read_buffer = [0u8; 48];
+    let mut linux_read_result = -9;
+    let mut linux_close_result = -9;
+    if linux_openat_result >= 0 {
+        let fd = linux_openat_result as u64;
+        linux_read_result = invoke_syscall(
+            SyscallAbi::LinuxBootstrap,
+            syscall::LINUX_SYS_READ,
+            [
+                fd,
+                linux_read_buffer.as_mut_ptr() as u64,
+                linux_read_buffer.len() as u64,
+                0,
+                0,
+                0,
+            ],
+        );
+        linux_close_result =
+            invoke_syscall(SyscallAbi::LinuxBootstrap, syscall::LINUX_SYS_CLOSE, [fd, 0, 0, 0, 0, 0]);
+    }
+
     let linux_getpid_result = invoke_syscall(SyscallAbi::LinuxBootstrap, syscall::LINUX_SYS_GETPID, [0; 6]);
+
+    let ghost_open_result = invoke_syscall(
+        SyscallAbi::GhostBootstrap,
+        syscall::GHOST_SYS_OPEN,
+        [OPEN_PATH.as_ptr() as u64, 0, 0, 0, 0, 0],
+    );
+    let mut ghost_read_buffer = [0u8; 48];
+    let mut ghost_read_result = -9;
+    let mut ghost_close_result = -9;
+    if ghost_open_result >= 0 {
+        let fd = ghost_open_result as u64;
+        ghost_read_result = invoke_syscall(
+            SyscallAbi::GhostBootstrap,
+            syscall::GHOST_SYS_READ,
+            [
+                fd,
+                ghost_read_buffer.as_mut_ptr() as u64,
+                ghost_read_buffer.len() as u64,
+                0,
+                0,
+                0,
+            ],
+        );
+        ghost_close_result =
+            invoke_syscall(SyscallAbi::GhostBootstrap, syscall::GHOST_SYS_CLOSE, [fd, 0, 0, 0, 0, 0]);
+    }
     let ghost_gettid_result = invoke_syscall(SyscallAbi::GhostBootstrap, syscall::GHOST_SYS_GETTID, [0; 6]);
+
+    let hxnu_open_result = invoke_syscall(
+        SyscallAbi::HxnuNativeBootstrap,
+        syscall::HXNU_SYS_OPEN,
+        [OPEN_PATH.as_ptr() as u64, 0, 0, 0, 0, 0],
+    );
+    let mut hxnu_read_buffer = [0u8; 48];
+    let mut hxnu_read_result = -9;
+    let mut hxnu_close_result = -9;
+    if hxnu_open_result >= 0 {
+        let fd = hxnu_open_result as u64;
+        hxnu_read_result = invoke_syscall(
+            SyscallAbi::HxnuNativeBootstrap,
+            syscall::HXNU_SYS_READ,
+            [
+                fd,
+                hxnu_read_buffer.as_mut_ptr() as u64,
+                hxnu_read_buffer.len() as u64,
+                0,
+                0,
+                0,
+            ],
+        );
+        hxnu_close_result =
+            invoke_syscall(SyscallAbi::HxnuNativeBootstrap, syscall::HXNU_SYS_CLOSE, [fd, 0, 0, 0, 0, 0]);
+    }
     let hxnu_abi_version_result = invoke_syscall(
         SyscallAbi::HxnuNativeBootstrap,
         syscall::HXNU_SYS_ABI_VERSION,
@@ -287,8 +388,17 @@ pub fn run_syscall_self_test() -> SyscallSelfTest {
 
     SyscallSelfTest {
         linux_write_result,
+        linux_openat_result,
+        linux_read_result,
+        linux_close_result,
         linux_getpid_result,
+        ghost_open_result,
+        ghost_read_result,
+        ghost_close_result,
         ghost_gettid_result,
+        hxnu_open_result,
+        hxnu_read_result,
+        hxnu_close_result,
         hxnu_abi_version_result,
     }
 }

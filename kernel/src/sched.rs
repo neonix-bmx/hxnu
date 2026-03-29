@@ -87,6 +87,16 @@ pub struct SchedulerStats {
 }
 
 #[derive(Copy, Clone)]
+pub struct ExitGroupRecord {
+    pub status: i32,
+    pub exited_thread_id: u64,
+    pub exited_thread_name: &'static str,
+    pub next_thread_id: u64,
+    pub next_thread_name: &'static str,
+    pub runqueue_depth: usize,
+}
+
+#[derive(Copy, Clone)]
 pub enum SchedulerError {
     Timer(arch::x86_64::TimerError),
     Timeout,
@@ -154,6 +164,7 @@ enum ThreadState {
     Unused,
     Runnable,
     Running,
+    Exited,
 }
 
 impl ThreadState {
@@ -162,6 +173,7 @@ impl ThreadState {
             Self::Unused => "unused",
             Self::Runnable => "runnable",
             Self::Running => "running",
+            Self::Exited => "exited",
         }
     }
 }
@@ -267,22 +279,45 @@ impl Scheduler {
         }
 
         let current_slot = self.runqueue[self.current_runqueue_index];
-        self.threads[current_slot].total_ticks = self.threads[current_slot]
-            .total_ticks
-            .saturating_add(1);
+        if self.threads[current_slot].state == ThreadState::Running {
+            self.threads[current_slot].total_ticks = self.threads[current_slot]
+                .total_ticks
+                .saturating_add(1);
+        }
 
         if self.runqueue_depth == 1 {
+            if self.threads[current_slot].state == ThreadState::Exited {
+                return None;
+            }
             return Some(self.dispatch_snapshot(current_slot));
         }
 
-        self.threads[current_slot].state = ThreadState::Runnable;
-        self.current_runqueue_index = (self.current_runqueue_index + 1) % self.runqueue_depth;
-        let next_slot = self.runqueue[self.current_runqueue_index];
+        if self.threads[current_slot].state == ThreadState::Running {
+            self.threads[current_slot].state = ThreadState::Runnable;
+        }
+        let mut next_index = (self.current_runqueue_index + 1) % self.runqueue_depth;
+        let mut found = false;
+        for _ in 0..self.runqueue_depth {
+            let candidate = self.runqueue[next_index];
+            if self.threads[candidate].state != ThreadState::Exited {
+                found = true;
+                break;
+            }
+            next_index = (next_index + 1) % self.runqueue_depth;
+        }
+        if !found {
+            return None;
+        }
+
+        self.current_runqueue_index = next_index;
+        let next_slot = self.runqueue[next_index];
         self.threads[next_slot].state = ThreadState::Running;
         self.threads[next_slot].dispatch_count = self.threads[next_slot]
             .dispatch_count
             .saturating_add(1);
-        self.context_switches = self.context_switches.saturating_add(1);
+        if next_slot != current_slot {
+            self.context_switches = self.context_switches.saturating_add(1);
+        }
 
         Some(self.dispatch_snapshot(next_slot))
     }
@@ -378,6 +413,59 @@ impl Scheduler {
             idle_thread_id: self.idle_thread_id,
         }
     }
+
+    fn remove_runqueue_index(&mut self, index: usize) {
+        if index >= self.runqueue_depth {
+            return;
+        }
+        for cursor in index..self.runqueue_depth.saturating_sub(1) {
+            self.runqueue[cursor] = self.runqueue[cursor + 1];
+        }
+        self.runqueue_depth = self.runqueue_depth.saturating_sub(1);
+        if self.runqueue_depth == 0 {
+            self.current_runqueue_index = 0;
+        } else if self.current_runqueue_index >= self.runqueue_depth {
+            self.current_runqueue_index = 0;
+        }
+    }
+
+    fn request_exit_group(&mut self, status: i32) -> Option<ExitGroupRecord> {
+        if !self.initialized || self.runqueue_depth == 0 {
+            return None;
+        }
+
+        let current_index = self.current_runqueue_index;
+        let current_slot = self.runqueue[current_index];
+        let current = &mut self.threads[current_slot];
+        if current.state == ThreadState::Exited {
+            return None;
+        }
+
+        current.state = ThreadState::Exited;
+        let exited_thread_id = current.id;
+        let exited_thread_name = current.name;
+
+        self.remove_runqueue_index(current_index);
+        let (next_thread_id, next_thread_name) = if self.runqueue_depth > 0 {
+            let next_slot = self.runqueue[self.current_runqueue_index];
+            if self.threads[next_slot].state != ThreadState::Exited {
+                self.threads[next_slot].state = ThreadState::Running;
+            }
+            self.context_switches = self.context_switches.saturating_add(1);
+            (self.threads[next_slot].id, self.threads[next_slot].name)
+        } else {
+            (0, "<none>")
+        };
+
+        Some(ExitGroupRecord {
+            status,
+            exited_thread_id,
+            exited_thread_name,
+            next_thread_id,
+            next_thread_name,
+            runqueue_depth: self.runqueue_depth,
+        })
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -466,6 +554,10 @@ pub fn on_timer_interrupt(_apic_tick: u64) {
 
 pub fn stats() -> SchedulerStats {
     unsafe { (*SCHEDULER.get()).stats(SCHEDULER_TICKS.load(Ordering::Acquire)) }
+}
+
+pub fn request_exit_group(status: i32) -> Option<ExitGroupRecord> {
+    unsafe { (*SCHEDULER.get()).request_exit_group(status) }
 }
 
 pub fn idle_loop() -> ! {

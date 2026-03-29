@@ -18,8 +18,17 @@ pub enum ExceptionSelfTest {
 #[derive(Copy, Clone)]
 pub struct SyscallSelfTest {
     pub linux_write_result: i64,
+    pub linux_openat_result: i64,
+    pub linux_read_result: i64,
+    pub linux_close_result: i64,
     pub linux_getpid_result: i64,
+    pub ghost_open_result: i64,
+    pub ghost_read_result: i64,
+    pub ghost_close_result: i64,
     pub ghost_gettid_result: i64,
+    pub hxnu_open_result: i64,
+    pub hxnu_read_result: i64,
+    pub hxnu_close_result: i64,
     pub hxnu_abi_version_result: i64,
 }
 
@@ -104,8 +113,17 @@ pub fn run_syscall_self_test() -> SyscallSelfTest {
     let result = interrupts::run_syscall_self_test();
     SyscallSelfTest {
         linux_write_result: result.linux_write_result,
+        linux_openat_result: result.linux_openat_result,
+        linux_read_result: result.linux_read_result,
+        linux_close_result: result.linux_close_result,
         linux_getpid_result: result.linux_getpid_result,
+        ghost_open_result: result.ghost_open_result,
+        ghost_read_result: result.ghost_read_result,
+        ghost_close_result: result.ghost_close_result,
         ghost_gettid_result: result.ghost_gettid_result,
+        hxnu_open_result: result.hxnu_open_result,
+        hxnu_read_result: result.hxnu_read_result,
+        hxnu_close_result: result.hxnu_close_result,
         hxnu_abi_version_result: result.hxnu_abi_version_result,
     }
 }
