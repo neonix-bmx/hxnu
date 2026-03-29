@@ -50,6 +50,9 @@ Current status:
 - Bootstrap `uaccess` copyin/copyout validation facade is online on `x86_64`
 - Bootstrap `openat/read/close` (`Linux`) and `open/read/close` (`Ghost`, `HXNU`) VFS-backed syscall paths are online
 - `exit_group` syscall path is connected to scheduler thread-exit request handling
+- Scheduler-backed `getpid/getppid/gettid` identity path is online for bootstrap syscall personalities
+- Open-file table ownership is now process-scoped, and `exit_group` purges owned descriptors
+- `exit_group` now tears down the current thread-group and advances to the next runnable scheduler entry
 - Multiple virtual TTY screen foundation is online on `x86_64`
 - Scheduler thread table and runqueue skeleton are online on `x86_64`
 - Bootstrap to idle-thread context switching is online on `x86_64`
