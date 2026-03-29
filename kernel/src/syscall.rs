@@ -28,6 +28,7 @@ pub const LINUX_SYS_MMAP: u64 = 9;
 pub const LINUX_SYS_MPROTECT: u64 = 10;
 pub const LINUX_SYS_MUNMAP: u64 = 11;
 pub const LINUX_SYS_BRK: u64 = 12;
+pub const LINUX_SYS_NANOSLEEP: u64 = 35;
 pub const LINUX_SYS_LSEEK: u64 = 8;
 pub const LINUX_SYS_IOCTL: u64 = 16;
 pub const LINUX_SYS_ACCESS: u64 = 21;
@@ -42,6 +43,7 @@ pub const LINUX_SYS_GETCWD: u64 = 79;
 pub const LINUX_SYS_CHDIR: u64 = 80;
 pub const LINUX_SYS_FCHDIR: u64 = 81;
 pub const LINUX_SYS_UMASK: u64 = 95;
+pub const LINUX_SYS_GETTIMEOFDAY: u64 = 96;
 pub const LINUX_SYS_GETUID: u64 = 102;
 pub const LINUX_SYS_GETGID: u64 = 104;
 pub const LINUX_SYS_GETEUID: u64 = 107;
@@ -57,6 +59,7 @@ pub const LINUX_SYS_NEWFSTATAT: u64 = 262;
 pub const LINUX_SYS_READLINKAT: u64 = 267;
 pub const LINUX_SYS_FACCESSAT: u64 = 269;
 pub const LINUX_SYS_DUP3: u64 = 292;
+pub const LINUX_SYS_GETRANDOM: u64 = 318;
 pub const LINUX_SYS_FACCESSAT2: u64 = 439;
 
 pub const GHOST_SYS_WRITE: u64 = 1;
@@ -94,6 +97,9 @@ pub const GHOST_SYS_MMAP: u64 = 32;
 pub const GHOST_SYS_MPROTECT: u64 = 33;
 pub const GHOST_SYS_MUNMAP: u64 = 34;
 pub const GHOST_SYS_BRK: u64 = 35;
+pub const GHOST_SYS_NANOSLEEP: u64 = 36;
+pub const GHOST_SYS_GETTIMEOFDAY: u64 = 37;
+pub const GHOST_SYS_GETRANDOM: u64 = 38;
 
 pub const HXNU_SYS_LOG_WRITE: u64 = 0x484e_0001;
 pub const HXNU_SYS_THREAD_SELF: u64 = 0x484e_0002;
@@ -129,6 +135,9 @@ pub const HXNU_SYS_MMAP: u64 = 0x484e_001f;
 pub const HXNU_SYS_MPROTECT: u64 = 0x484e_0020;
 pub const HXNU_SYS_MUNMAP: u64 = 0x484e_0021;
 pub const HXNU_SYS_BRK: u64 = 0x484e_0022;
+pub const HXNU_SYS_NANOSLEEP: u64 = 0x484e_0023;
+pub const HXNU_SYS_GETTIMEOFDAY: u64 = 0x484e_0024;
+pub const HXNU_SYS_GETRANDOM: u64 = 0x484e_0025;
 pub const HXNU_SYS_EXIT_GROUP: u64 = 0x484e_00ff;
 
 const HXNU_NATIVE_ABI_VERSION: i64 = 0x0001_0000;
@@ -167,6 +176,11 @@ const MAP_SHARED: u64 = 0x01;
 const MAP_PRIVATE: u64 = 0x02;
 const MAP_FIXED: u64 = 0x10;
 const MAP_ANONYMOUS: u64 = 0x20;
+
+const GRND_NONBLOCK: u64 = 0x0001;
+const GRND_RANDOM: u64 = 0x0002;
+const GRND_INSECURE: u64 = 0x0004;
+const GRND_MASK: u64 = GRND_NONBLOCK | GRND_RANDOM | GRND_INSECURE;
 
 const SEEK_SET: i32 = 0;
 const SEEK_CUR: i32 = 1;
@@ -267,6 +281,12 @@ pub struct LinuxBootstrapProbe {
     pub brk_result: i64,
     pub brk_set_result: i64,
     pub brk_restore_result: i64,
+    pub nanosleep_result: i64,
+    pub gettimeofday_result: i64,
+    pub gettimeofday_seconds: i64,
+    pub gettimeofday_microseconds: i64,
+    pub getrandom_result: i64,
+    pub getrandom_sample: u64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub newfstatat_result: i64,
@@ -324,6 +344,12 @@ pub struct GhostBootstrapProbe {
     pub brk_result: i64,
     pub brk_set_result: i64,
     pub brk_restore_result: i64,
+    pub nanosleep_result: i64,
+    pub gettimeofday_result: i64,
+    pub gettimeofday_seconds: i64,
+    pub gettimeofday_microseconds: i64,
+    pub getrandom_result: i64,
+    pub getrandom_sample: u64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub stat_result: i64,
@@ -377,6 +403,12 @@ pub struct HxnuBootstrapProbe {
     pub brk_result: i64,
     pub brk_set_result: i64,
     pub brk_restore_result: i64,
+    pub nanosleep_result: i64,
+    pub gettimeofday_result: i64,
+    pub gettimeofday_seconds: i64,
+    pub gettimeofday_microseconds: i64,
+    pub getrandom_result: i64,
+    pub getrandom_sample: u64,
     pub ioctl_result: i64,
     pub access_result: i64,
     pub stat_result: i64,
@@ -417,6 +449,13 @@ pub struct HxnuBootstrapProbe {
 struct LinuxTimespec {
     tv_sec: i64,
     tv_nsec: i64,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct LinuxTimeval {
+    tv_sec: i64,
+    tv_usec: i64,
 }
 
 #[repr(C)]
@@ -668,6 +707,7 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_MPROTECT => process_mprotect(args),
         LINUX_SYS_MUNMAP => process_munmap(args),
         LINUX_SYS_BRK => process_brk(args),
+        LINUX_SYS_NANOSLEEP => process_nanosleep(args),
         LINUX_SYS_GETDENTS64 => getdents_fd(args),
         LINUX_SYS_IOCTL => ioctl_fd(args),
         LINUX_SYS_LSEEK => seek_fd(args),
@@ -691,7 +731,9 @@ pub fn dispatch_linux_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         LINUX_SYS_GETUID | LINUX_SYS_GETEUID => user_id(),
         LINUX_SYS_GETGID | LINUX_SYS_GETEGID => group_id(),
         LINUX_SYS_SET_TID_ADDRESS => set_tid_address(args),
+        LINUX_SYS_GETTIMEOFDAY => process_gettimeofday(args),
         LINUX_SYS_CLOCK_GETTIME => linux_clock_gettime(args),
+        LINUX_SYS_GETRANDOM => process_getrandom(args),
         LINUX_SYS_UNAME => linux_uname(args),
         LINUX_SYS_EXIT | LINUX_SYS_EXIT_GROUP => exit_group(args),
         _ => SyscallOutcome::errno(ENOSYS),
@@ -708,6 +750,7 @@ pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         GHOST_SYS_MPROTECT => process_mprotect(args),
         GHOST_SYS_MUNMAP => process_munmap(args),
         GHOST_SYS_BRK => process_brk(args),
+        GHOST_SYS_NANOSLEEP => process_nanosleep(args),
         GHOST_SYS_DUP => dup_fd(args),
         GHOST_SYS_DUP2 => dup2_fd(args),
         GHOST_SYS_DUP3 => dup3_fd(args),
@@ -730,6 +773,8 @@ pub fn dispatch_ghost_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         GHOST_SYS_GETUID | GHOST_SYS_GETEUID => user_id(),
         GHOST_SYS_GETGID | GHOST_SYS_GETEGID => group_id(),
         GHOST_SYS_SET_TID_ADDRESS => set_tid_address(args),
+        GHOST_SYS_GETTIMEOFDAY => process_gettimeofday(args),
+        GHOST_SYS_GETRANDOM => process_getrandom(args),
         GHOST_SYS_UPTIME_NSEC => uptime_ns(),
         GHOST_SYS_UNAME => ghost_uname(args),
         GHOST_SYS_EXIT_GROUP => exit_group(args),
@@ -747,6 +792,7 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_MPROTECT => process_mprotect(args),
         HXNU_SYS_MUNMAP => process_munmap(args),
         HXNU_SYS_BRK => process_brk(args),
+        HXNU_SYS_NANOSLEEP => process_nanosleep(args),
         HXNU_SYS_DUP => dup_fd(args),
         HXNU_SYS_DUP2 => dup2_fd(args),
         HXNU_SYS_DUP3 => dup3_fd(args),
@@ -768,6 +814,8 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_GETUID | HXNU_SYS_GETEUID => user_id(),
         HXNU_SYS_GETGID | HXNU_SYS_GETEGID => group_id(),
         HXNU_SYS_SET_TID_ADDRESS => set_tid_address(args),
+        HXNU_SYS_GETTIMEOFDAY => process_gettimeofday(args),
+        HXNU_SYS_GETRANDOM => process_getrandom(args),
         HXNU_SYS_UPTIME_NSEC => uptime_ns(),
         HXNU_SYS_SCHED_YIELD => SyscallOutcome::success(0),
         HXNU_SYS_ABI_VERSION => SyscallOutcome::success(HXNU_NATIVE_ABI_VERSION),
@@ -842,6 +890,38 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
         DEFAULT_PROCESS_BRK as u64
     };
     let brk_restore_result = dispatch(abi, LINUX_SYS_BRK, [brk_restore_target, 0, 0, 0, 0, 0]).value;
+    let nanosleep_request = LinuxTimespec {
+        tv_sec: 0,
+        tv_nsec: 500_000,
+    };
+    let nanosleep_result = dispatch(
+        abi,
+        LINUX_SYS_NANOSLEEP,
+        [(&nanosleep_request as *const LinuxTimespec) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let mut timeval = LinuxTimeval { tv_sec: 0, tv_usec: 0 };
+    let gettimeofday_result = dispatch(
+        abi,
+        LINUX_SYS_GETTIMEOFDAY,
+        [(&mut timeval as *mut LinuxTimeval) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let mut random_buffer = [0u8; 16];
+    let getrandom_result = dispatch(
+        abi,
+        LINUX_SYS_GETRANDOM,
+        [
+            random_buffer.as_mut_ptr() as u64,
+            random_buffer.len() as u64,
+            GRND_NONBLOCK,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let getrandom_sample = sample_random_u64(&random_buffer);
     let mut winsize = LinuxWinsize {
         ws_row: 0,
         ws_col: 0,
@@ -1029,6 +1109,12 @@ pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
         brk_result,
         brk_set_result,
         brk_restore_result,
+        nanosleep_result,
+        gettimeofday_result,
+        gettimeofday_seconds: timeval.tv_sec,
+        gettimeofday_microseconds: timeval.tv_usec,
+        getrandom_result,
+        getrandom_sample,
         ioctl_result,
         access_result,
         newfstatat_result,
@@ -1131,6 +1217,38 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         DEFAULT_PROCESS_BRK as u64
     };
     let brk_restore_result = dispatch(abi, GHOST_SYS_BRK, [brk_restore_target, 0, 0, 0, 0, 0]).value;
+    let nanosleep_request = LinuxTimespec {
+        tv_sec: 0,
+        tv_nsec: 500_000,
+    };
+    let nanosleep_result = dispatch(
+        abi,
+        GHOST_SYS_NANOSLEEP,
+        [(&nanosleep_request as *const LinuxTimespec) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let mut timeval = LinuxTimeval { tv_sec: 0, tv_usec: 0 };
+    let gettimeofday_result = dispatch(
+        abi,
+        GHOST_SYS_GETTIMEOFDAY,
+        [(&mut timeval as *mut LinuxTimeval) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let mut random_buffer = [0u8; 16];
+    let getrandom_result = dispatch(
+        abi,
+        GHOST_SYS_GETRANDOM,
+        [
+            random_buffer.as_mut_ptr() as u64,
+            random_buffer.len() as u64,
+            GRND_NONBLOCK,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let getrandom_sample = sample_random_u64(&random_buffer);
     let mut winsize = LinuxWinsize {
         ws_row: 0,
         ws_col: 0,
@@ -1281,6 +1399,12 @@ pub fn run_ghost_bootstrap_probe() -> GhostBootstrapProbe {
         brk_result,
         brk_set_result,
         brk_restore_result,
+        nanosleep_result,
+        gettimeofday_result,
+        gettimeofday_seconds: timeval.tv_sec,
+        gettimeofday_microseconds: timeval.tv_usec,
+        getrandom_result,
+        getrandom_sample,
         ioctl_result,
         access_result,
         stat_result,
@@ -1372,6 +1496,38 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         DEFAULT_PROCESS_BRK as u64
     };
     let brk_restore_result = dispatch(abi, HXNU_SYS_BRK, [brk_restore_target, 0, 0, 0, 0, 0]).value;
+    let nanosleep_request = LinuxTimespec {
+        tv_sec: 0,
+        tv_nsec: 500_000,
+    };
+    let nanosleep_result = dispatch(
+        abi,
+        HXNU_SYS_NANOSLEEP,
+        [(&nanosleep_request as *const LinuxTimespec) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let mut timeval = LinuxTimeval { tv_sec: 0, tv_usec: 0 };
+    let gettimeofday_result = dispatch(
+        abi,
+        HXNU_SYS_GETTIMEOFDAY,
+        [(&mut timeval as *mut LinuxTimeval) as u64, 0, 0, 0, 0, 0],
+    )
+    .value;
+    let mut random_buffer = [0u8; 16];
+    let getrandom_result = dispatch(
+        abi,
+        HXNU_SYS_GETRANDOM,
+        [
+            random_buffer.as_mut_ptr() as u64,
+            random_buffer.len() as u64,
+            GRND_NONBLOCK,
+            0,
+            0,
+            0,
+        ],
+    )
+    .value;
+    let getrandom_sample = sample_random_u64(&random_buffer);
     let mut winsize = LinuxWinsize {
         ws_row: 0,
         ws_col: 0,
@@ -1513,6 +1669,12 @@ pub fn run_hxnu_bootstrap_probe() -> HxnuBootstrapProbe {
         brk_result,
         brk_set_result,
         brk_restore_result,
+        nanosleep_result,
+        gettimeofday_result,
+        gettimeofday_seconds: timeval.tv_sec,
+        gettimeofday_microseconds: timeval.tv_usec,
+        getrandom_result,
+        getrandom_sample,
         ioctl_result,
         access_result,
         stat_result,
@@ -1719,6 +1881,78 @@ fn process_brk(args: [u64; 6]) -> SyscallOutcome {
     }
     set_process_brk(requested);
     to_address_outcome(requested)
+}
+
+fn process_nanosleep(args: [u64; 6]) -> SyscallOutcome {
+    let request_ptr = args[0] as usize;
+    let remainder_ptr = args[1] as usize;
+    if request_ptr == 0 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    if remainder_ptr != 0 {
+        let remainder = LinuxTimespec { tv_sec: 0, tv_nsec: 0 };
+        if let Err(error) = copyout_struct(remainder_ptr, &remainder) {
+            return SyscallOutcome::errno(error);
+        }
+    }
+
+    SyscallOutcome::success(0)
+}
+
+fn process_gettimeofday(args: [u64; 6]) -> SyscallOutcome {
+    let timeval_ptr = args[0] as usize;
+    if timeval_ptr == 0 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+
+    let uptime_ns = time::uptime_nanoseconds();
+    let seconds = uptime_ns / 1_000_000_000;
+    let microseconds = (uptime_ns % 1_000_000_000) / 1_000;
+    let timeval = LinuxTimeval {
+        tv_sec: match i64::try_from(seconds) {
+            Ok(value) => value,
+            Err(_) => return SyscallOutcome::errno(ERANGE),
+        },
+        tv_usec: match i64::try_from(microseconds) {
+            Ok(value) => value,
+            Err(_) => return SyscallOutcome::errno(ERANGE),
+        },
+    };
+    if let Err(error) = copyout_struct(timeval_ptr, &timeval) {
+        return SyscallOutcome::errno(error);
+    }
+
+    SyscallOutcome::success(0)
+}
+
+fn process_getrandom(args: [u64; 6]) -> SyscallOutcome {
+    let destination_ptr = args[0] as usize;
+    let count = match usize::try_from(args[1]) {
+        Ok(count) => count,
+        Err(_) => return SyscallOutcome::errno(ERANGE),
+    };
+    let flags = args[2];
+    if flags & !GRND_MASK != 0 {
+        return SyscallOutcome::errno(EINVAL);
+    }
+    if count > MAX_READ_BYTES {
+        return SyscallOutcome::errno(ERANGE);
+    }
+    if count == 0 {
+        return SyscallOutcome::success(0);
+    }
+
+    let mut buffer = vec![0u8; count];
+    fill_pseudo_random_bytes(&mut buffer);
+    if let Err(error) = uaccess::copyout(&buffer, destination_ptr) {
+        return SyscallOutcome::errno(map_uaccess_error(error));
+    }
+
+    match i64::try_from(count) {
+        Ok(value) => SyscallOutcome::success(value),
+        Err(_) => SyscallOutcome::errno(ERANGE),
+    }
 }
 
 fn open_path_at(dirfd: i64, path_ptr: usize, flags: u64) -> SyscallOutcome {
@@ -3089,6 +3323,31 @@ fn copyout_struct<T: Copy>(ptr: usize, value: &T) -> Result<(), i64> {
 
 fn map_uaccess_error(error: UserCopyError) -> i64 {
     error.as_errno()
+}
+
+fn fill_pseudo_random_bytes(destination: &mut [u8]) {
+    let stats = sched::stats();
+    let mut state = time::uptime_nanoseconds()
+        ^ stats.current_process_id.rotate_left(13)
+        ^ stats.current_thread_id.rotate_left(29)
+        ^ 0x9e37_79b9_7f4a_7c15;
+    if state == 0 {
+        state = 0xa076_1d64_78bd_642f;
+    }
+
+    for byte in destination.iter_mut() {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        *byte = (state & 0xff) as u8;
+    }
+}
+
+fn sample_random_u64(bytes: &[u8]) -> u64 {
+    let mut prefix = [0u8; 8];
+    let copy_len = min(prefix.len(), bytes.len());
+    prefix[..copy_len].copy_from_slice(&bytes[..copy_len]);
+    u64::from_le_bytes(prefix)
 }
 
 fn write_uts_field(field: &mut [u8; 65], value: &str) {

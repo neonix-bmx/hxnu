@@ -53,6 +53,7 @@ Current status:
 - Scheduler-backed `getpid/getppid/gettid` identity path is online for bootstrap syscall personalities
 - Process-scoped `umask`, root-identity `getuid/getgid/geteuid/getegid`, and `set_tid_address` paths are online for Linux/Ghost/HXNU bootstrap personalities
 - Bootstrap anonymous `mmap/mprotect/munmap` and process-scoped `brk` syscall facades are online for Linux/Ghost/HXNU personalities
+- Bootstrap `nanosleep/gettimeofday/getrandom` syscall facades are online for Linux/Ghost/HXNU personalities
 - Open-file table ownership is now process-scoped, and `exit_group` purges owned descriptors
 - `exit_group` now tears down the current thread-group and advances to the next runnable scheduler entry
 - Ghost and HXNU-native parent-process identity calls are online (`getppid` / `process_parent`)
