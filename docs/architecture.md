@@ -148,6 +148,12 @@ That means:
 
 This reduces the chance that the kernel ABI accidentally collapses into a POSIX or legacy Ghost internal model.
 
+Bootstrap note:
+
+- before user virtual address-space and copyin/copyout are fully online, syscall compatibility can start in a constrained bootstrap mode
+- this mode should keep dispatch contracts and syscall numbers stable while treating pointer arguments as trusted kernel-side probes only
+- once user memory management is online, the same dispatch path should be moved behind strict user-pointer validation and copy helpers
+
 ## Driver Loading Direction
 
 HXNU should support both built-in drivers and filesystem-backed external drivers.

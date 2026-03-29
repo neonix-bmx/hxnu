@@ -21,6 +21,7 @@ mod procfs;
 mod sched;
 mod serial;
 mod smp;
+mod syscall;
 mod time;
 mod tty;
 mod vfs;
@@ -719,6 +720,24 @@ pub extern "C" fn _start() -> ! {
         scheduler_stats.context_switches,
         scheduler_stats.bootstrap_thread_id,
         scheduler_stats.idle_thread_id,
+    );
+    let linux_probe = syscall::run_linux_bootstrap_probe();
+    kprintln_style!(
+        crate::tty::ConsoleStyle::Success,
+        "HXNU: syscall bootstrap abi={} write={} getpid={} getppid={} gettid={} sched_yield={} clock_gettime={} monotonic={}.{:09} uname={} machine={} exit-captured={} exit-status={}",
+        syscall::LINUX_ABI_NAME,
+        linux_probe.write_result,
+        linux_probe.getpid_result,
+        linux_probe.getppid_result,
+        linux_probe.gettid_result,
+        linux_probe.sched_yield_result,
+        linux_probe.clock_gettime_result,
+        linux_probe.clock_seconds,
+        linux_probe.clock_nanoseconds,
+        linux_probe.uname_result,
+        linux_probe.machine_str(),
+        yes_no(linux_probe.exit_group_captured),
+        linux_probe.exit_group_status,
     );
     if let Some(root) = vfs::preview("/", 80) {
         kprintln_style!(
