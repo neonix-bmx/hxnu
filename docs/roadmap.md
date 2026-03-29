@@ -48,7 +48,7 @@ Current status:
 - Partial Linux + Ghost + HXNU-native syscall compatibility dispatcher bootstrap is online on `x86_64`
 - `x86_64` `int 0x80` syscall gate, register-frame dispatch, and entry self-test are online
 - Bootstrap `uaccess` copyin/copyout validation facade is online on `x86_64`
-- Bootstrap `openat/read/fstat/lseek/close` (`Linux`) and `open/read/fstat/seek/close` (`Ghost`, `HXNU`) VFS-backed syscall paths are online
+- Bootstrap `openat/newfstatat/read/fstat/lseek/close` (`Linux`) and `open/stat/read/fstat/seek/close` (`Ghost`, `HXNU`) VFS-backed syscall paths are online
 - `exit_group` syscall path is connected to scheduler thread-exit request handling
 - Scheduler-backed `getpid/getppid/gettid` identity path is online for bootstrap syscall personalities
 - Open-file table ownership is now process-scoped, and `exit_group` purges owned descriptors
@@ -131,7 +131,7 @@ Cross-repo status (as of 2026-03-29):
 - Rust cross compiler support with `x86_64` and `aarch64` as first-class targets (`x86_64` bootstrap release is online in external compiler repo)
 - C and C++ cross compiler support with `x86_64` and `aarch64` as first-class targets
 - Additional architectures after the main two are stable
-- PPC 32-bit bring-up
+- PowerISA 64-bit bring-up
 - Audio stack entry point
 - Additional driver families loaded from external driver directories
 - AHCI, NVMe, or virtio-blk expansion
