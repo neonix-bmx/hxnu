@@ -8,6 +8,10 @@ const ELF_CLASS_64: u8 = 2;
 const ELF_DATA_LITTLE: u8 = 1;
 const ELF_VERSION_CURRENT: u8 = 1;
 const MAX_PROGRAM_HEADERS: usize = 256;
+const PAGE_SIZE: u64 = 4096;
+const PF_EXECUTE: u32 = 0x1;
+const PF_WRITE: u32 = 0x2;
+const PF_READ: u32 = 0x4;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum ImageKind {
@@ -63,6 +67,51 @@ impl ProgramHeader {
     pub fn is_loadable(self) -> bool {
         self.segment_type == ProgramHeaderType::Load
     }
+
+    pub fn can_read(self) -> bool {
+        self.flags & PF_READ != 0
+    }
+
+    pub fn can_write(self) -> bool {
+        self.flags & PF_WRITE != 0
+    }
+
+    pub fn can_execute(self) -> bool {
+        self.flags & PF_EXECUTE != 0
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct SegmentPermissions {
+    pub read: bool,
+    pub write: bool,
+    pub execute: bool,
+}
+
+impl SegmentPermissions {
+    fn from_header(header: ProgramHeader) -> Self {
+        Self {
+            read: header.can_read(),
+            write: header.can_write(),
+            execute: header.can_execute(),
+        }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub struct LoadSegmentPlan {
+    pub index: usize,
+    pub file_offset: u64,
+    pub virtual_start: u64,
+    pub virtual_end: u64,
+    pub map_start: u64,
+    pub map_end: u64,
+    pub page_offset: u64,
+    pub file_bytes: u64,
+    pub memory_bytes: u64,
+    pub zero_fill_bytes: u64,
+    pub alignment: u64,
+    pub permissions: SegmentPermissions,
 }
 
 pub struct ElfImage {
@@ -96,6 +145,8 @@ pub enum ParseError {
     InvalidProgramHeaderTable,
     ProgramHeaderOutOfBounds,
     SegmentOutOfBounds,
+    InvalidSegmentSize,
+    SegmentAddressOverflow,
 }
 
 impl ParseError {
@@ -110,6 +161,8 @@ impl ParseError {
             Self::InvalidProgramHeaderTable => "elf program header table is invalid",
             Self::ProgramHeaderOutOfBounds => "elf program header extends beyond image bounds",
             Self::SegmentOutOfBounds => "elf segment extends beyond image bounds",
+            Self::InvalidSegmentSize => "elf segment file size exceeds memory size",
+            Self::SegmentAddressOverflow => "elf segment address arithmetic overflow",
         }
     }
 }
@@ -213,6 +266,9 @@ fn parse_elf64(image: &[u8]) -> Result<ElfImage, ParseError> {
         let file_size = read_u64_le(image, entry_offset + 32)?;
         let memory_size = read_u64_le(image, entry_offset + 40)?;
         let alignment = read_u64_le(image, entry_offset + 48)?;
+        if file_size > memory_size {
+            return Err(ParseError::InvalidSegmentSize);
+        }
 
         if file_size > 0 {
             let segment_start = offset as usize;
@@ -222,6 +278,13 @@ fn parse_elf64(image: &[u8]) -> Result<ElfImage, ParseError> {
             if segment_end > image.len() {
                 return Err(ParseError::SegmentOutOfBounds);
             }
+        }
+        if memory_size > 0
+            && virtual_address
+                .checked_add(memory_size)
+                .is_none()
+        {
+            return Err(ParseError::SegmentAddressOverflow);
         }
 
         let header = ProgramHeader {
@@ -256,6 +319,48 @@ fn parse_elf64(image: &[u8]) -> Result<ElfImage, ParseError> {
         interpreter,
         program_headers,
     })
+}
+
+pub fn build_load_plan(image: &ElfImage) -> Result<Vec<LoadSegmentPlan>, ParseError> {
+    let mut plan = Vec::new();
+    for (index, header) in image.program_headers.iter().enumerate() {
+        if !header.is_loadable() {
+            continue;
+        }
+
+        if header.file_size > header.memory_size {
+            return Err(ParseError::InvalidSegmentSize);
+        }
+
+        let virtual_end = header
+            .virtual_address
+            .checked_add(header.memory_size)
+            .ok_or(ParseError::SegmentAddressOverflow)?;
+        let map_start = align_down(header.virtual_address, PAGE_SIZE);
+        let map_end = align_up(virtual_end, PAGE_SIZE).ok_or(ParseError::SegmentAddressOverflow)?;
+        let page_offset = header
+            .virtual_address
+            .checked_sub(map_start)
+            .ok_or(ParseError::SegmentAddressOverflow)?;
+        let zero_fill_bytes = header.memory_size.saturating_sub(header.file_size);
+
+        plan.push(LoadSegmentPlan {
+            index,
+            file_offset: header.offset,
+            virtual_start: header.virtual_address,
+            virtual_end,
+            map_start,
+            map_end,
+            page_offset,
+            file_bytes: header.file_size,
+            memory_bytes: header.memory_size,
+            zero_fill_bytes,
+            alignment: header.alignment,
+            permissions: SegmentPermissions::from_header(*header),
+        });
+    }
+
+    Ok(plan)
 }
 
 fn parse_shebang(image: &[u8]) -> Option<ShebangImage> {
@@ -314,4 +419,13 @@ fn read_u64_le(bytes: &[u8], offset: usize) -> Result<u64, ParseError> {
     Ok(u64::from_le_bytes([
         slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7],
     ]))
+}
+
+const fn align_down(value: u64, alignment: u64) -> u64 {
+    value & !(alignment - 1)
+}
+
+fn align_up(value: u64, alignment: u64) -> Option<u64> {
+    let addend = alignment.checked_sub(1)?;
+    value.checked_add(addend).map(|rounded| rounded & !addend)
 }

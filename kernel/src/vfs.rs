@@ -119,6 +119,23 @@ pub struct ExecutableCandidate {
     pub executable: bool,
 }
 
+pub struct VmMapPlanEntry {
+    pub index: usize,
+    pub file_offset: u64,
+    pub virtual_start: u64,
+    pub virtual_end: u64,
+    pub map_start: u64,
+    pub map_end: u64,
+    pub page_offset: u64,
+    pub file_bytes: u64,
+    pub memory_bytes: u64,
+    pub zero_fill_bytes: u64,
+    pub alignment: u64,
+    pub readable: bool,
+    pub writable: bool,
+    pub executable: bool,
+}
+
 #[derive(Copy, Clone)]
 pub enum ExecutableDiscoveryError {
     VfsUnavailable,
@@ -158,8 +175,14 @@ pub struct ExecutableLoadPrep {
     pub writable_load_segments: usize,
     pub executable_load_segments: usize,
     pub max_alignment: u64,
+    pub vm_map_entries: Vec<VmMapPlanEntry>,
+    pub vm_map_total_bytes: u64,
+    pub vm_map_zero_fill_bytes: u64,
+    pub vm_map_start: Option<u64>,
+    pub vm_map_end: Option<u64>,
     pub interpreter: Option<String>,
     pub interpreter_argument: Option<String>,
+    pub interpreter_resolved: bool,
 }
 
 #[derive(Copy, Clone)]
@@ -301,6 +324,7 @@ pub fn prepare_executable_load(path: &str) -> Result<ExecutableLoadPrep, Executa
 
     match image {
         exec::ExecutableImage::Elf64(elf) => {
+            let load_plan = exec::build_load_plan(&elf).map_err(ExecutableLoadPrepError::Parse)?;
             let mut load_segment_count = 0usize;
             let mut load_base = None;
             let mut load_offset = None;
@@ -309,30 +333,61 @@ pub fn prepare_executable_load(path: &str) -> Result<ExecutableLoadPrep, Executa
             let mut writable_load_segments = 0usize;
             let mut executable_load_segments = 0usize;
             let mut max_alignment = 0u64;
-            for header in &elf.program_headers {
-                if !header.is_loadable() {
-                    continue;
-                }
-
+            let mut vm_map_entries = Vec::with_capacity(load_plan.len());
+            let mut vm_map_total_bytes = 0u64;
+            let mut vm_map_zero_fill_bytes = 0u64;
+            let mut vm_map_start = None;
+            let mut vm_map_end = None;
+            for header in load_plan {
                 load_segment_count += 1;
                 load_base = Some(
-                    load_base.map_or(header.virtual_address, |base: u64| {
-                        base.min(header.virtual_address)
+                    load_base.map_or(header.virtual_start, |base: u64| {
+                        base.min(header.virtual_start)
                     }),
                 );
-                load_offset = Some(load_offset.map_or(header.offset, |offset: u64| {
-                    offset.min(header.offset)
+                load_offset = Some(load_offset.map_or(header.file_offset, |offset: u64| {
+                    offset.min(header.file_offset)
                 }));
-                load_file_bytes = load_file_bytes.saturating_add(header.file_size);
-                load_memory_bytes = load_memory_bytes.saturating_add(header.memory_size);
-                if header.flags & 0x2 != 0 {
+                load_file_bytes = load_file_bytes.saturating_add(header.file_bytes);
+                load_memory_bytes = load_memory_bytes.saturating_add(header.memory_bytes);
+                if header.permissions.write {
                     writable_load_segments += 1;
                 }
-                if header.flags & 0x1 != 0 {
+                if header.permissions.execute {
                     executable_load_segments += 1;
                 }
                 max_alignment = max_alignment.max(header.alignment);
+                vm_map_total_bytes =
+                    vm_map_total_bytes.saturating_add(header.map_end.saturating_sub(header.map_start));
+                vm_map_zero_fill_bytes =
+                    vm_map_zero_fill_bytes.saturating_add(header.zero_fill_bytes);
+                vm_map_start = Some(vm_map_start.map_or(header.map_start, |start: u64| {
+                    start.min(header.map_start)
+                }));
+                vm_map_end = Some(vm_map_end.map_or(header.map_end, |end: u64| {
+                    end.max(header.map_end)
+                }));
+                vm_map_entries.push(VmMapPlanEntry {
+                    index: header.index,
+                    file_offset: header.file_offset,
+                    virtual_start: header.virtual_start,
+                    virtual_end: header.virtual_end,
+                    map_start: header.map_start,
+                    map_end: header.map_end,
+                    page_offset: header.page_offset,
+                    file_bytes: header.file_bytes,
+                    memory_bytes: header.memory_bytes,
+                    zero_fill_bytes: header.zero_fill_bytes,
+                    alignment: header.alignment,
+                    readable: header.permissions.read,
+                    writable: header.permissions.write,
+                    executable: header.permissions.execute,
+                });
             }
+            let interpreter = elf.interpreter;
+            let interpreter_resolved = interpreter
+                .as_deref()
+                .is_some_and(|path| lookup(path).is_some());
             Ok(ExecutableLoadPrep {
                 path: candidate.path,
                 mount: candidate.mount,
@@ -351,31 +406,46 @@ pub fn prepare_executable_load(path: &str) -> Result<ExecutableLoadPrep, Executa
                 writable_load_segments,
                 executable_load_segments,
                 max_alignment,
-                interpreter: elf.interpreter,
+                vm_map_entries,
+                vm_map_total_bytes,
+                vm_map_zero_fill_bytes,
+                vm_map_start,
+                vm_map_end,
+                interpreter,
                 interpreter_argument: None,
+                interpreter_resolved,
             })
         }
-        exec::ExecutableImage::Shebang(script) => Ok(ExecutableLoadPrep {
-            path: candidate.path,
-            mount: candidate.mount,
-            format: candidate.format,
-            size: candidate.size,
-            executable: candidate.executable,
-            image_type: None,
-            machine: None,
-            entry_point: None,
-            program_header_count: 0,
-            load_segment_count: 0,
-            load_base: None,
-            load_offset: None,
-            load_file_bytes: 0,
-            load_memory_bytes: 0,
-            writable_load_segments: 0,
-            executable_load_segments: 0,
-            max_alignment: 0,
-            interpreter: Some(script.interpreter),
-            interpreter_argument: script.argument,
-        }),
+        exec::ExecutableImage::Shebang(script) => {
+            let interpreter_resolved = lookup(&script.interpreter).is_some();
+            Ok(ExecutableLoadPrep {
+                path: candidate.path,
+                mount: candidate.mount,
+                format: candidate.format,
+                size: candidate.size,
+                executable: candidate.executable,
+                image_type: None,
+                machine: None,
+                entry_point: None,
+                program_header_count: 0,
+                load_segment_count: 0,
+                load_base: None,
+                load_offset: None,
+                load_file_bytes: 0,
+                load_memory_bytes: 0,
+                writable_load_segments: 0,
+                executable_load_segments: 0,
+                max_alignment: 0,
+                vm_map_entries: Vec::new(),
+                vm_map_total_bytes: 0,
+                vm_map_zero_fill_bytes: 0,
+                vm_map_start: None,
+                vm_map_end: None,
+                interpreter: Some(script.interpreter),
+                interpreter_argument: script.argument,
+                interpreter_resolved,
+            })
+        }
         exec::ExecutableImage::Text | exec::ExecutableImage::Unknown => Ok(ExecutableLoadPrep {
             path: candidate.path,
             mount: candidate.mount,
@@ -394,8 +464,14 @@ pub fn prepare_executable_load(path: &str) -> Result<ExecutableLoadPrep, Executa
             writable_load_segments: 0,
             executable_load_segments: 0,
             max_alignment: 0,
+            vm_map_entries: Vec::new(),
+            vm_map_total_bytes: 0,
+            vm_map_zero_fill_bytes: 0,
+            vm_map_start: None,
+            vm_map_end: None,
             interpreter: None,
             interpreter_argument: None,
+            interpreter_resolved: false,
         }),
     }
 }
@@ -521,6 +597,19 @@ pub fn format_u64_hex(value: Option<u64>) -> String {
             text
         }
         None => String::from("<none>"),
+    }
+}
+
+pub const fn format_rwx(readable: bool, writable: bool, executable: bool) -> &'static str {
+    match (readable, writable, executable) {
+        (true, true, true) => "rwx",
+        (true, true, false) => "rw-",
+        (true, false, true) => "r-x",
+        (true, false, false) => "r--",
+        (false, true, true) => "-wx",
+        (false, true, false) => "-w-",
+        (false, false, true) => "--x",
+        (false, false, false) => "---",
     }
 }
 

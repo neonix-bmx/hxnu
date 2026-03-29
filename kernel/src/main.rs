@@ -533,10 +533,11 @@ pub extern "C" fn _start() -> ! {
             error.as_str()
         ),
     }
-    match vfs::prepare_init_load() {
+    let init_load_prep = vfs::prepare_init_load();
+    match &init_load_prep {
         Ok(prep) => kprintln_style!(
             crate::tty::ConsoleStyle::Accent,
-            "HXNU: init load-prep path={} mount={} format={} size={} executable={} entry={} machine={} type={} ph={} load={} load-base={} load-offset={} load-file={} load-mem={} load-w={} load-x={} align={} interp={} interp-arg={}",
+            "HXNU: init load-prep path={} mount={} format={} size={} executable={} entry={} machine={} type={} ph={} load={} load-base={} load-offset={} load-file={} load-mem={} load-w={} load-x={} align={} vm-map={} vm-bytes={} vm-zero={} vm-start={} vm-end={} interp={} interp-ok={} interp-arg={}",
             prep.path,
             prep.mount.as_str(),
             prep.format.as_str(),
@@ -554,7 +555,13 @@ pub extern "C" fn _start() -> ! {
             prep.writable_load_segments,
             prep.executable_load_segments,
             prep.max_alignment,
+            prep.vm_map_entries.len(),
+            prep.vm_map_total_bytes,
+            prep.vm_map_zero_fill_bytes,
+            vfs::format_u64_hex(prep.vm_map_start),
+            vfs::format_u64_hex(prep.vm_map_end),
             prep.interpreter.as_deref().unwrap_or("<none>"),
+            yes_no(prep.interpreter_resolved),
             prep.interpreter_argument.as_deref().unwrap_or("<none>"),
         ),
         Err(error) => kprintln_style!(
@@ -562,6 +569,26 @@ pub extern "C" fn _start() -> ! {
             "HXNU: init load-prep offline reason={}",
             error.as_str()
         ),
+    }
+    if let Ok(prep) = &init_load_prep {
+        if let Some(segment) = prep.vm_map_entries.first() {
+            kprintln_style!(
+                crate::tty::ConsoleStyle::Muted,
+                "HXNU: init vm-map[0] idx={} off={} vaddr={}..{} map={}..{} page-off={} file={} mem={} zero={} align={} perms={}",
+                segment.index,
+                vfs::format_u64_hex(Some(segment.file_offset)),
+                vfs::format_u64_hex(Some(segment.virtual_start)),
+                vfs::format_u64_hex(Some(segment.virtual_end)),
+                vfs::format_u64_hex(Some(segment.map_start)),
+                vfs::format_u64_hex(Some(segment.map_end)),
+                segment.page_offset,
+                segment.file_bytes,
+                segment.memory_bytes,
+                segment.zero_fill_bytes,
+                segment.alignment,
+                vfs::format_rwx(segment.readable, segment.writable, segment.executable),
+            );
+        }
     }
     for console_id in 1..tty::VIRTUAL_CONSOLE_COUNT as u32 {
         let _ = tty::write_to_console(

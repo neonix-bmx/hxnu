@@ -43,6 +43,7 @@ Current status:
 - `cpio` `newc` initrd discovery and `/initrd` read path are online on `x86_64`
 - `/initrd/init` executable candidate discovery and format probe are online on `x86_64`
 - `/initrd/init` ELF64 header and program-header inspection skeleton is online on `x86_64`
+- `/initrd/init` ELF `PT_LOAD` vm-map planning with RWX and BSS accounting is online on `x86_64`
 - Multiple virtual TTY screen foundation is online on `x86_64`
 - Scheduler thread table and runqueue skeleton are online on `x86_64`
 - Bootstrap to idle-thread context switching is online on `x86_64`
