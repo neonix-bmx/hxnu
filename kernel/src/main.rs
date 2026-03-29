@@ -573,6 +573,33 @@ pub extern "C" fn _start() -> ! {
             error.as_str()
         ),
     }
+    let init_load_image = vfs::materialize_init_image();
+    match &init_load_image {
+        Ok(image) => kprintln_style!(
+            crate::tty::ConsoleStyle::Accent,
+            "HXNU: init load-image path={} mount={} format={} size={} executable={} entry={} machine={} type={} vm-map={} vm-bytes={} vm-zero={} interp={} interp-src={} interp-ok={} interp-arg={}",
+            image.path,
+            image.mount.as_str(),
+            image.format.as_str(),
+            image.size,
+            yes_no(image.executable),
+            vfs::format_u64_hex(image.entry_point),
+            vfs::format_u16_hex(image.machine),
+            vfs::format_u16_hex(image.image_type),
+            image.vm_map_images.len(),
+            image.vm_map_total_bytes,
+            image.vm_map_zero_fill_bytes,
+            image.interpreter.as_deref().unwrap_or("<none>"),
+            image.interpreter_source.as_deref().unwrap_or("<none>"),
+            yes_no(image.interpreter_resolved),
+            image.interpreter_argument.as_deref().unwrap_or("<none>"),
+        ),
+        Err(error) => kprintln_style!(
+            crate::tty::ConsoleStyle::Warning,
+            "HXNU: init load-image offline reason={}",
+            error.as_str()
+        ),
+    }
     if let Ok(prep) = &init_load_prep {
         if let Some(segment) = prep.vm_map_entries.first() {
             kprintln_style!(
@@ -588,6 +615,27 @@ pub extern "C" fn _start() -> ! {
                 segment.file_bytes,
                 segment.memory_bytes,
                 segment.zero_fill_bytes,
+                segment.alignment,
+                vfs::format_rwx(segment.readable, segment.writable, segment.executable),
+            );
+        }
+    }
+    if let Ok(image) = &init_load_image {
+        if let Some(segment) = image.vm_map_images.first() {
+            kprintln_style!(
+                crate::tty::ConsoleStyle::Muted,
+                "HXNU: init load-image[0] idx={} off={} vaddr={}..{} map={}..{} page-off={} file={} mem={} zero={} bytes={} align={} perms={}",
+                segment.index,
+                vfs::format_u64_hex(Some(segment.file_offset)),
+                vfs::format_u64_hex(Some(segment.virtual_start)),
+                vfs::format_u64_hex(Some(segment.virtual_end)),
+                vfs::format_u64_hex(Some(segment.map_start)),
+                vfs::format_u64_hex(Some(segment.map_end)),
+                segment.page_offset,
+                segment.file_bytes,
+                segment.memory_bytes,
+                segment.zero_fill_bytes,
+                segment.bytes.len(),
                 segment.alignment,
                 vfs::format_rwx(segment.readable, segment.writable, segment.executable),
             );

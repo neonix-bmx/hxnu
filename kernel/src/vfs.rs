@@ -136,6 +136,24 @@ pub struct VmMapPlanEntry {
     pub executable: bool,
 }
 
+pub struct VmMapImageEntry {
+    pub index: usize,
+    pub file_offset: u64,
+    pub virtual_start: u64,
+    pub virtual_end: u64,
+    pub map_start: u64,
+    pub map_end: u64,
+    pub page_offset: u64,
+    pub file_bytes: u64,
+    pub memory_bytes: u64,
+    pub zero_fill_bytes: u64,
+    pub alignment: u64,
+    pub readable: bool,
+    pub writable: bool,
+    pub executable: bool,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Copy, Clone)]
 pub enum ExecutableDiscoveryError {
     VfsUnavailable,
@@ -184,6 +202,24 @@ pub struct ExecutableLoadPrep {
     pub interpreter_source: Option<String>,
     pub interpreter_argument: Option<String>,
     pub interpreter_resolved: bool,
+}
+
+pub struct ExecutableLoadImage {
+    pub path: String,
+    pub mount: VfsMountKind,
+    pub format: ExecutableFormat,
+    pub size: usize,
+    pub executable: bool,
+    pub image_type: Option<u16>,
+    pub machine: Option<u16>,
+    pub entry_point: Option<u64>,
+    pub interpreter: Option<String>,
+    pub interpreter_source: Option<String>,
+    pub interpreter_argument: Option<String>,
+    pub interpreter_resolved: bool,
+    pub vm_map_images: Vec<VmMapImageEntry>,
+    pub vm_map_total_bytes: u64,
+    pub vm_map_zero_fill_bytes: u64,
 }
 
 #[derive(Copy, Clone)]
@@ -314,6 +350,10 @@ pub fn discover_executable(path: &str) -> Result<ExecutableCandidate, Executable
 
 pub fn prepare_init_load() -> Result<ExecutableLoadPrep, ExecutableLoadPrepError> {
     prepare_executable_load(INIT_PATH)
+}
+
+pub fn materialize_init_image() -> Result<ExecutableLoadImage, ExecutableLoadPrepError> {
+    materialize_executable_image(INIT_PATH)
 }
 
 pub fn prepare_executable_load(path: &str) -> Result<ExecutableLoadPrep, ExecutableLoadPrepError> {
@@ -478,6 +518,109 @@ pub fn prepare_executable_load(path: &str) -> Result<ExecutableLoadPrep, Executa
             interpreter_source: None,
             interpreter_argument: None,
             interpreter_resolved: false,
+        }),
+    }
+}
+
+pub fn materialize_executable_image(path: &str) -> Result<ExecutableLoadImage, ExecutableLoadPrepError> {
+    let candidate = discover_executable(path).map_err(ExecutableLoadPrepError::Discovery)?;
+    let bytes = read_executable_bytes(candidate.mount, &candidate.path).ok_or(
+        ExecutableLoadPrepError::Discovery(ExecutableDiscoveryError::BackendUnavailable),
+    )?;
+    let image = exec::inspect(bytes).map_err(ExecutableLoadPrepError::Parse)?;
+
+    match image {
+        exec::ExecutableImage::Elf64(elf) => {
+            let load_plan = exec::build_load_plan(&elf).map_err(ExecutableLoadPrepError::Parse)?;
+            let mapped_segments =
+                exec::materialize_load_segments(bytes, &load_plan).map_err(ExecutableLoadPrepError::Parse)?;
+            let mut vm_map_images = Vec::with_capacity(load_plan.len());
+            let mut vm_map_total_bytes = 0u64;
+            let mut vm_map_zero_fill_bytes = 0u64;
+
+            for (header, mapped_bytes) in load_plan.into_iter().zip(mapped_segments.into_iter()) {
+                let mapped_len = u64::try_from(mapped_bytes.len())
+                    .map_err(|_| ExecutableLoadPrepError::Parse(exec::ParseError::SegmentAddressOverflow))?;
+                vm_map_total_bytes = vm_map_total_bytes.saturating_add(mapped_len);
+                vm_map_zero_fill_bytes =
+                    vm_map_zero_fill_bytes.saturating_add(header.zero_fill_bytes);
+                vm_map_images.push(VmMapImageEntry {
+                    index: header.index,
+                    file_offset: header.file_offset,
+                    virtual_start: header.virtual_start,
+                    virtual_end: header.virtual_end,
+                    map_start: header.map_start,
+                    map_end: header.map_end,
+                    page_offset: header.page_offset,
+                    file_bytes: header.file_bytes,
+                    memory_bytes: header.memory_bytes,
+                    zero_fill_bytes: header.zero_fill_bytes,
+                    alignment: header.alignment,
+                    readable: header.permissions.read,
+                    writable: header.permissions.write,
+                    executable: header.permissions.execute,
+                    bytes: mapped_bytes,
+                });
+            }
+
+            let interpreter = elf.interpreter;
+            let interpreter_source = interpreter.as_deref().and_then(resolve_runtime_path);
+            let interpreter_resolved = interpreter_source.is_some();
+            Ok(ExecutableLoadImage {
+                path: candidate.path,
+                mount: candidate.mount,
+                format: candidate.format,
+                size: candidate.size,
+                executable: candidate.executable,
+                image_type: Some(elf.image_type),
+                machine: Some(elf.machine),
+                entry_point: Some(elf.entry_point),
+                interpreter,
+                interpreter_source,
+                interpreter_argument: None,
+                interpreter_resolved,
+                vm_map_images,
+                vm_map_total_bytes,
+                vm_map_zero_fill_bytes,
+            })
+        }
+        exec::ExecutableImage::Shebang(script) => {
+            let interpreter_source = resolve_runtime_path(&script.interpreter);
+            let interpreter_resolved = interpreter_source.is_some();
+            Ok(ExecutableLoadImage {
+                path: candidate.path,
+                mount: candidate.mount,
+                format: candidate.format,
+                size: candidate.size,
+                executable: candidate.executable,
+                image_type: None,
+                machine: None,
+                entry_point: None,
+                interpreter: Some(script.interpreter),
+                interpreter_source,
+                interpreter_argument: script.argument,
+                interpreter_resolved,
+                vm_map_images: Vec::new(),
+                vm_map_total_bytes: 0,
+                vm_map_zero_fill_bytes: 0,
+            })
+        }
+        exec::ExecutableImage::Text | exec::ExecutableImage::Unknown => Ok(ExecutableLoadImage {
+            path: candidate.path,
+            mount: candidate.mount,
+            format: candidate.format,
+            size: candidate.size,
+            executable: candidate.executable,
+            image_type: None,
+            machine: None,
+            entry_point: None,
+            interpreter: None,
+            interpreter_source: None,
+            interpreter_argument: None,
+            interpreter_resolved: false,
+            vm_map_images: Vec::new(),
+            vm_map_total_bytes: 0,
+            vm_map_zero_fill_bytes: 0,
         }),
     }
 }

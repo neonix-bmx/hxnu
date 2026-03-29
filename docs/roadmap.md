@@ -44,6 +44,7 @@ Current status:
 - `/initrd/init` executable candidate discovery and format probe are online on `x86_64`
 - `/initrd/init` ELF64 header and program-header inspection skeleton is online on `x86_64`
 - `/initrd/init` ELF `PT_LOAD` vm-map planning with RWX and BSS accounting is online on `x86_64`
+- `/initrd/init` ELF `PT_LOAD` segment materialization into zero-initialized vm-map buffers is online on `x86_64`
 - Early Unix-like shebang interpreter fallback from `/bin/*` to `/initrd/bin/*` is online on `x86_64`
 - Partial Linux + Ghost + HXNU-native syscall compatibility dispatcher bootstrap is online on `x86_64`
 - `x86_64` `int 0x80` syscall gate, register-frame dispatch, and entry self-test are online

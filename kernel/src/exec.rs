@@ -363,6 +363,44 @@ pub fn build_load_plan(image: &ElfImage) -> Result<Vec<LoadSegmentPlan>, ParseEr
     Ok(plan)
 }
 
+pub fn materialize_load_segments(image: &[u8], plan: &[LoadSegmentPlan]) -> Result<Vec<Vec<u8>>, ParseError> {
+    let mut segments = Vec::with_capacity(plan.len());
+    for segment in plan {
+        let mapped_len_u64 = segment
+            .map_end
+            .checked_sub(segment.map_start)
+            .ok_or(ParseError::SegmentAddressOverflow)?;
+        let mapped_len = usize::try_from(mapped_len_u64).map_err(|_| ParseError::SegmentAddressOverflow)?;
+        let mut mapped = Vec::new();
+        mapped.resize(mapped_len, 0);
+
+        if segment.file_bytes > 0 {
+            let file_start = usize::try_from(segment.file_offset).map_err(|_| ParseError::SegmentOutOfBounds)?;
+            let file_len = usize::try_from(segment.file_bytes).map_err(|_| ParseError::SegmentOutOfBounds)?;
+            let file_end = file_start
+                .checked_add(file_len)
+                .ok_or(ParseError::SegmentOutOfBounds)?;
+            if file_end > image.len() {
+                return Err(ParseError::SegmentOutOfBounds);
+            }
+
+            let dst_start = usize::try_from(segment.page_offset).map_err(|_| ParseError::SegmentAddressOverflow)?;
+            let dst_end = dst_start
+                .checked_add(file_len)
+                .ok_or(ParseError::SegmentAddressOverflow)?;
+            if dst_end > mapped.len() {
+                return Err(ParseError::SegmentAddressOverflow);
+            }
+
+            mapped[dst_start..dst_end].copy_from_slice(&image[file_start..file_end]);
+        }
+
+        segments.push(mapped);
+    }
+
+    Ok(segments)
+}
+
 fn parse_shebang(image: &[u8]) -> Option<ShebangImage> {
     if !image.starts_with(b"#!") {
         return None;
