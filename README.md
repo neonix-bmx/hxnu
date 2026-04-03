@@ -97,7 +97,7 @@ Current bring-up logs also include:
 - SMP topology inventory and AP bring-up target summary from `MADT`
 - read-only `procfs` snapshot bootstrap
 - read-only `devfs` namespace bootstrap
-- dynamic block device nodes under `/dev` (`/dev/sda`, `/dev/sda1`, ...) when block discovery is online
+- dynamic block device nodes under `/dev` (`/dev/sdX`, `/dev/nvmeXn1`, `/dev/nvmXn` and partition variants) when block discovery is online
 - minimal VFS mount and read facade for `/`, `/dev`, `/proc`, and `/initrd`
 - normalized VFS path resolution and node lookup facade for mount-backed paths
 - `cpio` `newc` initrd module discovery and `/initrd` read path

@@ -1276,6 +1276,34 @@ pub extern "C" fn _start() -> ! {
             sda1,
         );
     }
+    if let Some(nvme0n1) = vfs::preview("/dev/nvme0n1", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: devfs preview nvme0n1={}",
+            nvme0n1,
+        );
+    }
+    if let Some(nvme0n1p1) = vfs::preview("/dev/nvme0n1p1", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: devfs preview nvme0n1p1={}",
+            nvme0n1p1,
+        );
+    }
+    if let Some(nvm0n) = vfs::preview("/dev/nvm0n", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: devfs preview nvm0n={}",
+            nvm0n,
+        );
+    }
+    if let Some(nvm0np1) = vfs::preview("/dev/nvm0np1", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: devfs preview nvm0np1={}",
+            nvm0np1,
+        );
+    }
     if let Some(initrd_root) = vfs::preview("/initrd", 80) {
         kprintln_style!(
             crate::tty::ConsoleStyle::Muted,

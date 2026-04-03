@@ -81,11 +81,7 @@ pub fn initialize() -> Result<DevfsSummary, DevfsError> {
 }
 
 pub fn summary() -> DevfsSummary {
-    let dynamic_nodes = if block::is_initialized() {
-        block::device_count().saturating_add(block::partition_count())
-    } else {
-        0
-    };
+    let dynamic_nodes = dynamic_block_node_count();
     let node_count = STATIC_DEVFS_NODES.len().saturating_add(dynamic_nodes);
     DevfsSummary {
         directory_count: DEVFS_DIRECTORIES.len(),
@@ -135,26 +131,7 @@ fn render_root() -> String {
     }
 
     if block::is_initialized() {
-        let mut device_index = 0usize;
-        while device_index < block::device_count() {
-            if let Some(device) = block::device(device_index) {
-                let device_name = format_sd_disk_name(device_index);
-                let _ = writeln!(text, "{}", device_name);
-
-                let mut partition_index = 1usize;
-                let mut global_partition_index = 0usize;
-                while global_partition_index < block::partition_count() {
-                    if let Some(partition) = block::partition(global_partition_index) {
-                        if partition.device_id == device.id {
-                            let _ = writeln!(text, "{}{}", device_name, partition_index);
-                            partition_index += 1;
-                        }
-                    }
-                    global_partition_index += 1;
-                }
-            }
-            device_index += 1;
-        }
+        append_block_nodes(&mut text);
     }
 
     text
@@ -205,20 +182,20 @@ fn resolve_block_device_path(path: &str) -> Option<block::BlockDeviceInfo> {
     if !block::is_initialized() {
         return None;
     }
-    let (device_index, partition_index) = parse_sd_path(path)?;
-    if partition_index.is_some() {
+    let parsed = parse_block_path(path)?;
+    if parsed.partition_index.is_some() {
         return None;
     }
-    block::device(device_index)
+    block::device(parsed.device_index)
 }
 
 fn resolve_block_partition_path(path: &str) -> Option<block::PartitionInfo> {
     if !block::is_initialized() {
         return None;
     }
-    let (device_index, partition_index) = parse_sd_path(path)?;
-    let partition_index = partition_index?;
-    let device = block::device(device_index)?;
+    let parsed = parse_block_path(path)?;
+    let partition_index = parsed.partition_index?;
+    let device = block::device(parsed.device_index)?;
     find_device_partition(device.id, partition_index)
 }
 
@@ -243,7 +220,19 @@ fn find_device_partition(device_id: u16, device_partition_index: usize) -> Optio
     None
 }
 
-fn parse_sd_path(path: &str) -> Option<(usize, Option<usize>)> {
+fn parse_block_path(path: &str) -> Option<ParsedBlockPath> {
+    parse_sd_path(path)
+        .or_else(|| parse_nvme_path(path))
+        .or_else(|| parse_nvm_path(path))
+}
+
+#[derive(Copy, Clone)]
+struct ParsedBlockPath {
+    device_index: usize,
+    partition_index: Option<usize>,
+}
+
+fn parse_sd_path(path: &str) -> Option<ParsedBlockPath> {
     let suffix = path.strip_prefix("/dev/sd")?;
     if suffix.is_empty() {
         return None;
@@ -264,11 +253,60 @@ fn parse_sd_path(path: &str) -> Option<(usize, Option<usize>)> {
     let device_index = decode_sd_letters(&suffix[..letter_end])?;
     let remainder = &suffix[letter_end..];
     if remainder.is_empty() {
-        return Some((device_index, None));
+        return Some(ParsedBlockPath {
+            device_index,
+            partition_index: None,
+        });
     }
 
     let partition_index = parse_positive_decimal(remainder)?;
-    Some((device_index, Some(partition_index)))
+    Some(ParsedBlockPath {
+        device_index,
+        partition_index: Some(partition_index),
+    })
+}
+
+fn parse_nvme_path(path: &str) -> Option<ParsedBlockPath> {
+    let suffix = path.strip_prefix("/dev/nvme")?;
+    let (device_index, after_device) = parse_decimal_prefix(suffix)?;
+    let after_n = after_device.strip_prefix('n')?;
+    let (namespace, after_namespace) = parse_decimal_prefix(after_n)?;
+    if namespace != 1 {
+        return None;
+    }
+
+    if after_namespace.is_empty() {
+        return Some(ParsedBlockPath {
+            device_index,
+            partition_index: None,
+        });
+    }
+
+    let partition_suffix = after_namespace.strip_prefix('p')?;
+    let partition_index = parse_positive_decimal(partition_suffix)?;
+    Some(ParsedBlockPath {
+        device_index,
+        partition_index: Some(partition_index),
+    })
+}
+
+fn parse_nvm_path(path: &str) -> Option<ParsedBlockPath> {
+    let suffix = path.strip_prefix("/dev/nvm")?;
+    let (device_index, after_device) = parse_decimal_prefix(suffix)?;
+    let after_n = after_device.strip_prefix('n')?;
+    if after_n.is_empty() {
+        return Some(ParsedBlockPath {
+            device_index,
+            partition_index: None,
+        });
+    }
+
+    let partition_suffix = after_n.strip_prefix('p')?;
+    let partition_index = parse_positive_decimal(partition_suffix)?;
+    Some(ParsedBlockPath {
+        device_index,
+        partition_index: Some(partition_index),
+    })
 }
 
 fn decode_sd_letters(letters: &str) -> Option<usize> {
@@ -302,10 +340,98 @@ fn parse_positive_decimal(input: &str) -> Option<usize> {
     Some(value)
 }
 
+fn parse_decimal_prefix(input: &str) -> Option<(usize, &str)> {
+    if input.is_empty() {
+        return None;
+    }
+    let mut end = 0usize;
+    for byte in input.bytes() {
+        if byte.is_ascii_digit() {
+            end += 1;
+            continue;
+        }
+        break;
+    }
+    if end == 0 {
+        return None;
+    }
+    let value = parse_unsigned_decimal(&input[..end])?;
+    Some((value, &input[end..]))
+}
+
+fn parse_unsigned_decimal(input: &str) -> Option<usize> {
+    if input.is_empty() {
+        return None;
+    }
+    let mut value = 0usize;
+    for byte in input.bytes() {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        value = value.checked_mul(10)?;
+        value = value.checked_add(usize::from(byte - b'0'))?;
+    }
+    Some(value)
+}
+
 fn format_sd_disk_name(index: usize) -> String {
     let mut name = String::from("sd");
     name.push_str(&encode_sd_letters(index));
     name
+}
+
+fn format_nvme_disk_name(index: usize) -> String {
+    let mut name = String::from("nvme");
+    push_usize_decimal(&mut name, index);
+    name.push_str("n1");
+    name
+}
+
+fn format_nvm_disk_name(index: usize) -> String {
+    let mut name = String::from("nvm");
+    push_usize_decimal(&mut name, index);
+    name.push('n');
+    name
+}
+
+fn format_sd_partition_name(device_index: usize, partition_index: usize) -> String {
+    let mut name = format_sd_disk_name(device_index);
+    push_usize_decimal(&mut name, partition_index);
+    name
+}
+
+fn format_nvme_partition_name(device_index: usize, partition_index: usize) -> String {
+    let mut name = format_nvme_disk_name(device_index);
+    name.push('p');
+    push_usize_decimal(&mut name, partition_index);
+    name
+}
+
+fn format_nvm_partition_name(device_index: usize, partition_index: usize) -> String {
+    let mut name = format_nvm_disk_name(device_index);
+    name.push('p');
+    push_usize_decimal(&mut name, partition_index);
+    name
+}
+
+fn push_usize_decimal(out: &mut String, mut value: usize) {
+    if value == 0 {
+        out.push('0');
+        return;
+    }
+
+    let mut reversed = [0u8; 20];
+    let mut len = 0usize;
+    while value > 0 {
+        reversed[len] = b'0' + (value % 10) as u8;
+        len += 1;
+        value /= 10;
+    }
+
+    while len > 0 {
+        len -= 1;
+        out.push(reversed[len] as char);
+    }
 }
 
 fn encode_sd_letters(index: usize) -> String {
@@ -385,6 +511,56 @@ fn count_device_partitions(device_id: u16) -> usize {
         index += 1;
     }
     count
+}
+
+fn dynamic_block_node_count() -> usize {
+    if !block::is_initialized() {
+        return 0;
+    }
+
+    let device_count = block::device_count();
+    let partition_count = block::partition_count();
+    device_count
+        .saturating_mul(3)
+        .saturating_add(partition_count.saturating_mul(3))
+}
+
+fn append_block_nodes(text: &mut String) {
+    let mut device_index = 0usize;
+    while device_index < block::device_count() {
+        if let Some(device) = block::device(device_index) {
+            let _ = writeln!(text, "{}", format_sd_disk_name(device_index));
+            let _ = writeln!(text, "{}", format_nvme_disk_name(device_index));
+            let _ = writeln!(text, "{}", format_nvm_disk_name(device_index));
+
+            let mut partition_index = 1usize;
+            let mut global_partition_index = 0usize;
+            while global_partition_index < block::partition_count() {
+                if let Some(partition) = block::partition(global_partition_index) {
+                    if partition.device_id == device.id {
+                        let _ = writeln!(
+                            text,
+                            "{}",
+                            format_sd_partition_name(device_index, partition_index)
+                        );
+                        let _ = writeln!(
+                            text,
+                            "{}",
+                            format_nvme_partition_name(device_index, partition_index)
+                        );
+                        let _ = writeln!(
+                            text,
+                            "{}",
+                            format_nvm_partition_name(device_index, partition_index)
+                        );
+                        partition_index += 1;
+                    }
+                }
+                global_partition_index += 1;
+            }
+        }
+        device_index += 1;
+    }
 }
 
 fn format_guid(guid: &[u8; 16]) -> String {
