@@ -71,6 +71,14 @@ HXNU: Limine protocol handshake ok
 HXNU: Rust kernel skeleton online
 ```
 
+## FAT Smoke Acceptance
+
+```bash
+./scripts/smoke-fat.sh
+```
+
+This command builds a synthetic GPT + FAT16 smoke image, boots it under QEMU, and verifies `/fat` mount visibility from kernel logs (`block`, `fat`, and `vfs` acceptance lines).
+
 Current bring-up logs also include:
 
 - boot-relative timestamps
