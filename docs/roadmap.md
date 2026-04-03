@@ -73,7 +73,11 @@ Current status:
 - `mm/pager` reclaim/restore path is online via compressed store with bootstrap roundtrip smoke on `x86_64`
 - `/proc/compress` endpoint is online with compression runtime/store/pager observability counters on `x86_64`
 - Bootstrap block-device layer is online with initrd-backed read-only sector facade on `x86_64`
+- Block driver registry with `InitrdRamdisk` first driver contract is online on `x86_64`
 - MBR signature probe and primary partition discovery scaffold are online via block layer on `x86_64`
+- GPT header (`EFI PART`) probe and bounded entry discovery with MBR fallback are online on `x86_64`
+- FAT16/32 read-only root directory listing mount is online at `/fat` when a valid partition is present
+- `/proc/block` now includes block driver and partition-table observability, and `/proc/fat` is online for FAT mount status
 - Open-file table ownership is now process-scoped, and `exit_group` purges owned descriptors
 - `exit_group` now tears down the current thread-group and advances to the next runnable scheduler entry
 - Ghost and HXNU-native parent-process identity calls are online (`getppid` / `process_parent`)

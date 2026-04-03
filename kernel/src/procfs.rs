@@ -4,6 +4,7 @@ use core::fmt::Write;
 
 use crate::arch;
 use crate::block;
+use crate::fat;
 use crate::init_exec;
 use crate::mm;
 use crate::sched;
@@ -11,7 +12,7 @@ use crate::smp;
 use crate::time;
 
 const PROCFS_DIRECTORIES: [&str; 2] = ["/", "/proc"];
-const PROCFS_FILES: [&str; 9] = [
+const PROCFS_FILES: [&str; 10] = [
     "/proc/version",
     "/proc/uptime",
     "/proc/meminfo",
@@ -21,6 +22,7 @@ const PROCFS_FILES: [&str; 9] = [
     "/proc/initexec",
     "/proc/compress",
     "/proc/block",
+    "/proc/fat",
 ];
 
 struct GlobalProcfs(UnsafeCell<Option<ProcfsState>>);
@@ -112,6 +114,7 @@ pub fn read(path: &str) -> Option<String> {
         "/proc/initexec" => Some(init_exec::render_status()),
         "/proc/compress" => Some(render_compress()),
         "/proc/block" => Some(render_block()),
+        "/proc/fat" => Some(render_fat()),
         _ => None,
     }
 }
@@ -323,10 +326,12 @@ fn render_block() -> String {
     let stats = block::stats();
 
     let _ = writeln!(text, "initialized {}", yes_no(block::is_initialized()));
+    let _ = writeln!(text, "driver_count {}", summary.driver_count);
     let _ = writeln!(text, "device_count {}", summary.device_count);
     let _ = writeln!(text, "partition_count {}", summary.partition_count);
     let _ = writeln!(text, "total_bytes {}", summary.total_bytes);
     let _ = writeln!(text, "mbr_devices {}", summary.mbr_device_count);
+    let _ = writeln!(text, "gpt_devices {}", summary.gpt_device_count);
     let _ = writeln!(text, "read_requests {}", stats.read_requests);
     let _ = writeln!(text, "read_sectors {}", stats.read_sectors);
     let _ = writeln!(text, "read_bytes {}", stats.read_bytes);
@@ -347,6 +352,7 @@ fn render_block() -> String {
                 device.sector_size,
                 device.size_bytes,
             );
+            let _ = writeln!(text, "device{} driver={}", index, device.driver_name);
         }
         index += 1;
     }
@@ -354,23 +360,83 @@ fn render_block() -> String {
     let mut part_index = 0usize;
     while part_index < block::partition_count() {
         if let Some(partition) = block::partition(part_index) {
-            let _ = writeln!(
-                text,
-                "partition{} id={} dev={} mbr-index={} type={:#04x} bootable={} lba={} sectors={}",
-                part_index,
-                partition.id,
-                partition.device_id,
-                partition.mbr_index,
-                partition.partition_type,
-                yes_no(partition.bootable),
-                partition.start_lba,
-                partition.sector_count,
-            );
+            match partition.table_kind {
+                block::PartitionTableKind::Mbr => {
+                    let _ = writeln!(
+                        text,
+                        "partition{} id={} dev={} table={} mbr-index={} type={:#04x} bootable={} lba={} sectors={}",
+                        part_index,
+                        partition.id,
+                        partition.device_id,
+                        partition.table_kind.as_str(),
+                        partition.mbr_index,
+                        partition.partition_type,
+                        yes_no(partition.bootable),
+                        partition.start_lba,
+                        partition.sector_count,
+                    );
+                }
+                block::PartitionTableKind::Gpt => {
+                    let _ = writeln!(
+                        text,
+                        "partition{} id={} dev={} table={} gpt-index={} type-guid={} part-guid={} lba={} sectors={}",
+                        part_index,
+                        partition.id,
+                        partition.device_id,
+                        partition.table_kind.as_str(),
+                        partition.gpt_index,
+                        format_guid(&partition.gpt_type_guid),
+                        format_guid(&partition.gpt_partition_guid),
+                        partition.start_lba,
+                        partition.sector_count,
+                    );
+                }
+            }
         }
         part_index += 1;
     }
 
     text
+}
+
+fn render_fat() -> String {
+    let mut text = String::new();
+    let summary = fat::summary();
+
+    let _ = writeln!(text, "initialized {}", yes_no(fat::is_initialized()));
+    let _ = writeln!(text, "mounted {}", yes_no(summary.mounted));
+    let _ = writeln!(text, "partition_id {:?}", summary.partition_id);
+    let _ = writeln!(text, "device_id {:?}", summary.device_id);
+    let _ = writeln!(
+        text,
+        "partition_table {}",
+        summary.partition_table.map_or("<none>", |kind| kind.as_str())
+    );
+    let _ = writeln!(
+        text,
+        "fat_type {}",
+        summary.fat_type.map_or("<none>", |kind| kind.as_str())
+    );
+    let _ = writeln!(text, "root_entry_count {}", summary.root_entry_count);
+    let _ = writeln!(text, "directory_count {}", summary.directory_count);
+    text
+}
+
+fn format_guid(guid: &[u8; 16]) -> String {
+    let mut text = String::new();
+    for (index, byte) in guid.iter().copied().enumerate() {
+        if index == 4 || index == 6 || index == 8 || index == 10 {
+            text.push('-');
+        }
+        append_hex_byte(&mut text, byte);
+    }
+    text
+}
+
+fn append_hex_byte(text: &mut String, byte: u8) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    text.push(HEX[(byte >> 4) as usize] as char);
+    text.push(HEX[(byte & 0x0f) as usize] as char);
 }
 
 fn cpu_flags(cpu: &arch::x86_64::CpuInfo) -> String {
