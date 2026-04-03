@@ -5,6 +5,7 @@ use alloc::vec::Vec;
 use core::alloc::Layout;
 use core::cell::UnsafeCell;
 use core::cmp::min;
+use core::fmt::Write;
 use core::mem::{size_of, size_of_val};
 use core::slice;
 use core::str;
@@ -1272,6 +1273,40 @@ impl GlobalRseqTable {
 
 static RSEQ_TABLE: GlobalRseqTable = GlobalRseqTable::new();
 
+#[derive(Copy, Clone)]
+enum ExecPreflightStatus {
+    Ready,
+    Error(i64),
+}
+
+struct ExecPreflightRecord {
+    process_id: u64,
+    path: String,
+    mount: VfsMountKind,
+    format: ExecutableFormat,
+    argv_count: usize,
+    env_count: usize,
+    total_bytes: usize,
+    flags: u64,
+    status: ExecPreflightStatus,
+}
+
+struct GlobalExecPreflight(UnsafeCell<Option<ExecPreflightRecord>>);
+
+unsafe impl Sync for GlobalExecPreflight {}
+
+impl GlobalExecPreflight {
+    const fn new() -> Self {
+        Self(UnsafeCell::new(None))
+    }
+
+    fn get(&self) -> *mut Option<ExecPreflightRecord> {
+        self.0.get()
+    }
+}
+
+static EXEC_PREFLIGHT: GlobalExecPreflight = GlobalExecPreflight::new();
+
 pub fn dispatch(abi: SyscallAbi, number: u64, args: [u64; 6]) -> SyscallOutcome {
     match abi {
         SyscallAbi::LinuxBootstrap => dispatch_linux_bootstrap(number, args),
@@ -1489,6 +1524,35 @@ pub fn dispatch_hxnu_bootstrap(number: u64, args: [u64; 6]) -> SyscallOutcome {
         HXNU_SYS_EXIT_GROUP => exit_group(args),
         _ => SyscallOutcome::errno(ENOSYS),
     }
+}
+
+pub fn render_exec_status() -> String {
+    let mut text = String::new();
+    let Some(record) = (unsafe { (&*EXEC_PREFLIGHT.get()).as_ref() }) else {
+        let _ = writeln!(text, "status never");
+        return text;
+    };
+
+    match record.status {
+        ExecPreflightStatus::Ready => {
+            let _ = writeln!(text, "status ready");
+            let _ = writeln!(text, "note handoff-pending");
+        }
+        ExecPreflightStatus::Error(errno) => {
+            let _ = writeln!(text, "status error");
+            let _ = writeln!(text, "errno {}", errno);
+        }
+    }
+
+    let _ = writeln!(text, "process_id {}", record.process_id);
+    let _ = writeln!(text, "path {}", record.path);
+    let _ = writeln!(text, "mount {}", record.mount.as_str());
+    let _ = writeln!(text, "format {}", record.format.as_str());
+    let _ = writeln!(text, "argv_count {}", record.argv_count);
+    let _ = writeln!(text, "env_count {}", record.env_count);
+    let _ = writeln!(text, "arg_env_bytes {}", record.total_bytes);
+    let _ = writeln!(text, "flags {:#x}", record.flags);
+    text
 }
 
 pub fn run_linux_bootstrap_probe() -> LinuxBootstrapProbe {
@@ -4499,6 +4563,32 @@ struct ExecStringVectorSummary {
     total_bytes: usize,
 }
 
+struct ExecPreflightTelemetry {
+    process_id: u64,
+    path: String,
+    mount: VfsMountKind,
+    format: ExecutableFormat,
+    argv_count: usize,
+    env_count: usize,
+    total_bytes: usize,
+    flags: u64,
+}
+
+impl ExecPreflightTelemetry {
+    fn new(process_id: u64, flags: u64) -> Self {
+        Self {
+            process_id,
+            path: String::from("<unresolved>"),
+            mount: VfsMountKind::Root,
+            format: ExecutableFormat::Unknown,
+            argv_count: 0,
+            env_count: 0,
+            total_bytes: 0,
+            flags,
+        }
+    }
+}
+
 fn process_exec_at(
     dirfd: i64,
     path_ptr: usize,
@@ -4506,54 +4596,70 @@ fn process_exec_at(
     envp_ptr: usize,
     flags: u64,
 ) -> SyscallOutcome {
+    let process_id = sched::stats().current_process_id;
+    let mut telemetry = ExecPreflightTelemetry::new(process_id, flags);
+    macro_rules! fail_exec {
+        ($errno:expr) => {{
+            record_exec_preflight(&telemetry, ExecPreflightStatus::Error($errno));
+            return SyscallOutcome::errno($errno);
+        }};
+    }
+
     let exec_path = match resolve_exec_path_at(dirfd, path_ptr, flags) {
         Ok(path) => path,
-        Err(error) => return SyscallOutcome::errno(error),
+        Err(error) => fail_exec!(error),
     };
+    telemetry.path = exec_path.clone();
 
     let node = match vfs::lookup(&exec_path) {
         Some(node) => node,
-        None => return SyscallOutcome::errno(ENOENT),
+        None => fail_exec!(ENOENT),
     };
+    telemetry.path = node.path.clone();
+    telemetry.mount = node.mount;
     if node.kind == VfsNodeKind::Directory {
-        return SyscallOutcome::errno(EISDIR);
+        fail_exec!(EISDIR);
     }
     if node.kind != VfsNodeKind::File {
-        return SyscallOutcome::errno(EACCES);
+        fail_exec!(EACCES);
     }
     if !node.executable {
-        return SyscallOutcome::errno(EACCES);
+        fail_exec!(EACCES);
     }
 
     let argv = match scan_exec_string_vector(argv_ptr, MAX_EXEC_ARG_COUNT, MAX_EXEC_ARG_ENV_BYTES) {
         Ok(summary) => summary,
-        Err(error) => return SyscallOutcome::errno(error),
+        Err(error) => fail_exec!(error),
     };
     let env_budget = MAX_EXEC_ARG_ENV_BYTES.saturating_sub(argv.total_bytes);
     let envp = match scan_exec_string_vector(envp_ptr, MAX_EXEC_ENV_COUNT, env_budget) {
         Ok(summary) => summary,
-        Err(error) => return SyscallOutcome::errno(error),
+        Err(error) => fail_exec!(error),
     };
+    telemetry.argv_count = argv.count;
+    telemetry.env_count = envp.count;
+    telemetry.total_bytes = argv.total_bytes.saturating_add(envp.total_bytes);
     if argv
         .total_bytes
         .checked_add(envp.total_bytes)
         .is_none_or(|total| total > MAX_EXEC_ARG_ENV_BYTES)
     {
-        return SyscallOutcome::errno(E2BIG);
+        fail_exec!(E2BIG);
     }
 
     let prep = match vfs::prepare_executable_load(&node.path) {
         Ok(prep) => prep,
-        Err(error) => return SyscallOutcome::errno(map_exec_load_prep_error(error)),
+        Err(error) => fail_exec!(map_exec_load_prep_error(error)),
     };
+    telemetry.format = prep.format;
     match prep.format {
         ExecutableFormat::Elf => {}
         ExecutableFormat::ShebangScript => {
             if !prep.interpreter_resolved {
-                return SyscallOutcome::errno(ENOENT);
+                fail_exec!(ENOENT);
             }
         }
-        ExecutableFormat::Text | ExecutableFormat::Unknown => return SyscallOutcome::errno(ENOEXEC),
+        ExecutableFormat::Text | ExecutableFormat::Unknown => fail_exec!(ENOEXEC),
     }
 
     let _ = (
@@ -4562,6 +4668,7 @@ fn process_exec_at(
         argv.count,
         envp.count,
     );
+    record_exec_preflight(&telemetry, ExecPreflightStatus::Ready);
 
     // Phase 3.5 preflight: validates path/argv/envp and loader compatibility.
     // Process image replacement and non-returning handoff are still pending.
@@ -4664,6 +4771,21 @@ fn map_exec_discovery_error(error: vfs::ExecutableDiscoveryError) -> i64 {
         vfs::ExecutableDiscoveryError::BackendUnavailable => EIO,
         vfs::ExecutableDiscoveryError::ParseFailed(_) => ENOEXEC,
     }
+}
+
+fn record_exec_preflight(telemetry: &ExecPreflightTelemetry, status: ExecPreflightStatus) {
+    let slot = unsafe { &mut *EXEC_PREFLIGHT.get() };
+    *slot = Some(ExecPreflightRecord {
+        process_id: telemetry.process_id,
+        path: telemetry.path.clone(),
+        mount: telemetry.mount,
+        format: telemetry.format,
+        argv_count: telemetry.argv_count,
+        env_count: telemetry.env_count,
+        total_bytes: telemetry.total_bytes,
+        flags: telemetry.flags,
+        status,
+    });
 }
 
 fn open_path_at(dirfd: i64, path_ptr: usize, flags: u64) -> SyscallOutcome {

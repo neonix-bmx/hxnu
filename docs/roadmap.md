@@ -65,6 +65,7 @@ Current status:
 - Bootstrap `pipe/pipe2` and `poll/ppoll` syscall facades are online for Linux/Ghost/HXNU personalities
 - Bootstrap `fork/vfork/clone` synthetic child-spawn and `wait4` child-reap facades are online for Linux/Ghost/HXNU personalities
 - Bootstrap `exec` preflight (`execve/execveat` for Linux, `exec` for Ghost/HXNU) now validates path + `argv/envp` + loader compatibility before returning `ENOSYS` pending real image replacement
+- `/proc/exec` endpoint now reports last exec preflight status (`ready/error`), path, mount, format, and argument/environment sizing counters
 - Portability-level matrix for Linux/Unix-style userland bring-up is documented in `docs/portability-matrix.md`
 - SXRC-derived memory compression integration contract is documented in `docs/sxrc-derivative-plan.md`
 - `tools/sxrc-profile-gen` host-side skeleton and generated kernel profile artifact (`kernel/src/mm/compress/profile_generated.rs`) are online

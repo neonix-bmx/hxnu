@@ -9,10 +9,11 @@ use crate::init_exec;
 use crate::mm;
 use crate::sched;
 use crate::smp;
+use crate::syscall;
 use crate::time;
 
 const PROCFS_DIRECTORIES: [&str; 2] = ["/", "/proc"];
-const PROCFS_FILES: [&str; 10] = [
+const PROCFS_FILES: [&str; 11] = [
     "/proc/version",
     "/proc/uptime",
     "/proc/meminfo",
@@ -20,6 +21,7 @@ const PROCFS_FILES: [&str; 10] = [
     "/proc/schedstat",
     "/proc/topology",
     "/proc/initexec",
+    "/proc/exec",
     "/proc/compress",
     "/proc/block",
     "/proc/fat",
@@ -112,6 +114,7 @@ pub fn read(path: &str) -> Option<String> {
         "/proc/schedstat" => Some(render_schedstat()),
         "/proc/topology" => Some(render_topology(state)),
         "/proc/initexec" => Some(init_exec::render_status()),
+        "/proc/exec" => Some(syscall::render_exec_status()),
         "/proc/compress" => Some(render_compress()),
         "/proc/block" => Some(render_block()),
         "/proc/fat" => Some(render_fat()),

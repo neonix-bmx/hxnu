@@ -1255,6 +1255,13 @@ pub extern "C" fn _start() -> ! {
             schedstat,
         );
     }
+    if let Some(exec_status) = vfs::preview("/proc/exec", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: procfs preview exec={}",
+            exec_status,
+        );
+    }
     if let Some(devlist) = vfs::preview("/dev", 80) {
         kprintln_style!(
             crate::tty::ConsoleStyle::Muted,
