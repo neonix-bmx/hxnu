@@ -10,6 +10,7 @@ mod arch;
 mod block;
 mod devfs;
 mod exec;
+mod fat;
 mod fb;
 mod initrd;
 mod init_exec;
@@ -614,11 +615,13 @@ pub extern "C" fn _start() -> ! {
     match block::initialize() {
         Ok(summary) => kprintln_style!(
             crate::tty::ConsoleStyle::Success,
-            "HXNU: block online devices={} partitions={} total-bytes={} mbr-devices={}",
+            "HXNU: block online drivers={} devices={} partitions={} total-bytes={} mbr-devices={} gpt-devices={}",
+            summary.driver_count,
             summary.device_count,
             summary.partition_count,
             summary.total_bytes,
             summary.mbr_device_count,
+            summary.gpt_device_count,
         ),
         Err(error) => {
             kprintln_style!(
@@ -628,6 +631,23 @@ pub extern "C" fn _start() -> ! {
             );
             halt();
         }
+    }
+    match fat::initialize() {
+        Ok(summary) => kprintln_style!(
+            crate::tty::ConsoleStyle::Success,
+            "HXNU: fat online table={} partition={:?} device={:?} type={} root-entries={} directories={}",
+            summary.partition_table.map_or("<none>", |kind| kind.as_str()),
+            summary.partition_id,
+            summary.device_id,
+            summary.fat_type.map_or("<none>", |kind| kind.as_str()),
+            summary.root_entry_count,
+            summary.directory_count,
+        ),
+        Err(error) => kprintln_style!(
+            crate::tty::ConsoleStyle::Warning,
+            "HXNU: fat offline reason={}",
+            error.as_str()
+        ),
     }
     match vfs::initialize() {
         Ok(summary) => kprintln_style!(
@@ -1247,6 +1267,13 @@ pub extern "C" fn _start() -> ! {
             crate::tty::ConsoleStyle::Muted,
             "HXNU: initrd preview root={}",
             initrd_root,
+        );
+    }
+    if let Some(fat_root) = vfs::preview("/fat", 80) {
+        kprintln_style!(
+            crate::tty::ConsoleStyle::Muted,
+            "HXNU: fat preview root={}",
+            fat_root,
         );
     }
     if let Some(init) = vfs::preview("/initrd/init", 80) {

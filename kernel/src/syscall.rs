@@ -5093,6 +5093,7 @@ fn mount_device_id(mount: VfsMountKind) -> u64 {
         VfsMountKind::Devfs => 2,
         VfsMountKind::Initrd => 3,
         VfsMountKind::Procfs => 4,
+        VfsMountKind::Fat => 5,
     }
 }
 
