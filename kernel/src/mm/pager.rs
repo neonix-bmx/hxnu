@@ -191,10 +191,11 @@ impl PagerState {
         self.verify_roundtrip(0x1000, &zero_page())?;
         self.verify_roundtrip(0x1001, &same_byte_page(0xAA))?;
         self.verify_roundtrip(0x1002, &pattern_page())?;
+        self.verify_roundtrip(0x1003, &dictionary_word_page(0x0000_ffff))?;
         self.stats.smoke_successes = self.stats.smoke_successes.saturating_add(1);
         Ok(PagerSmokeSummary {
-            tested_pages: 3,
-            verified_pages: 3,
+            tested_pages: 4,
+            verified_pages: 4,
         })
     }
 
@@ -311,6 +312,17 @@ fn pattern_page() -> [u8; compress::PAGE_BYTES] {
     while index < page.len() {
         page[index] = (index as u8).wrapping_mul(17).wrapping_add(5);
         index += 1;
+    }
+    page
+}
+
+fn dictionary_word_page(word: u32) -> [u8; compress::PAGE_BYTES] {
+    let mut page = [0u8; compress::PAGE_BYTES];
+    let bytes = word.to_le_bytes();
+    let mut index = 0usize;
+    while index + 4 <= page.len() {
+        page[index..index + 4].copy_from_slice(&bytes);
+        index += 4;
     }
     page
 }

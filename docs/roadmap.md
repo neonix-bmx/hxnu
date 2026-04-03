@@ -68,7 +68,7 @@ Current status:
 - SXRC-derived memory compression integration contract is documented in `docs/sxrc-derivative-plan.md`
 - `tools/sxrc-profile-gen` host-side skeleton and generated kernel profile artifact (`kernel/src/mm/compress/profile_generated.rs`) are online
 - `mm/compress` backend trait contract and `NullBackend` bootstrap runtime facade are online on `x86_64`
-- `mm/compress` bounded header/checksum codec path with `Zero/Same/Raw` classes and deterministic `Raw` fallback is online on `x86_64`
+- `mm/compress` bounded header/checksum codec path with `Zero/Same/Sxrc/Raw` classes is online, with deterministic `Raw` fallback on `x86_64`
 - `mm/compress/store` fixed-capacity compressed-page slot store and accounting facade are online on `x86_64`
 - `mm/pager` reclaim/restore path is online via compressed store with bootstrap roundtrip smoke on `x86_64`
 - `/proc/compress` endpoint is online with compression runtime/store/pager observability counters on `x86_64`
