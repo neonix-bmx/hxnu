@@ -36,6 +36,7 @@ struct InitrdState {
     module_path: Option<&'static str>,
     module_label: Option<&'static str>,
     module_count: usize,
+    archive: &'static [u8],
     archive_bytes: usize,
     entries: Vec<InitrdEntry>,
 }
@@ -108,11 +109,13 @@ pub fn initialize() -> Result<InitrdSummary, InitrdError> {
     }
 
     let module = select_initrd_module(&modules).ok_or(InitrdError::ModuleMissing)?;
-    let entries = parse_newc_archive(module.bytes())?;
+    let archive = module.bytes();
+    let entries = parse_newc_archive(archive)?;
     *slot = Some(InitrdState {
         module_path: module.path(),
         module_label: module.string(),
         module_count: modules.len(),
+        archive,
         archive_bytes: module.size(),
         entries,
     });
@@ -161,6 +164,11 @@ pub fn module_path() -> Option<&'static str> {
 pub fn module_label() -> Option<&'static str> {
     let state = unsafe { (&*INITRD.get()).as_ref()? };
     state.module_label
+}
+
+pub fn archive_bytes() -> Option<&'static [u8]> {
+    let state = unsafe { (&*INITRD.get()).as_ref()? };
+    Some(state.archive)
 }
 
 pub fn read(path: &str) -> Option<String> {

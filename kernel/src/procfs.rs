@@ -3,6 +3,7 @@ use core::cell::UnsafeCell;
 use core::fmt::Write;
 
 use crate::arch;
+use crate::block;
 use crate::init_exec;
 use crate::mm;
 use crate::sched;
@@ -10,7 +11,7 @@ use crate::smp;
 use crate::time;
 
 const PROCFS_DIRECTORIES: [&str; 2] = ["/", "/proc"];
-const PROCFS_FILES: [&str; 8] = [
+const PROCFS_FILES: [&str; 9] = [
     "/proc/version",
     "/proc/uptime",
     "/proc/meminfo",
@@ -19,6 +20,7 @@ const PROCFS_FILES: [&str; 8] = [
     "/proc/topology",
     "/proc/initexec",
     "/proc/compress",
+    "/proc/block",
 ];
 
 struct GlobalProcfs(UnsafeCell<Option<ProcfsState>>);
@@ -109,6 +111,7 @@ pub fn read(path: &str) -> Option<String> {
         "/proc/topology" => Some(render_topology(state)),
         "/proc/initexec" => Some(init_exec::render_status()),
         "/proc/compress" => Some(render_compress()),
+        "/proc/block" => Some(render_block()),
         _ => None,
     }
 }
@@ -311,6 +314,62 @@ fn render_compress() -> String {
     let _ = writeln!(text, "pager_restored_raw_pages {}", pager.restored_raw_pages);
     let _ = writeln!(text, "pager_smoke_runs {}", pager.smoke_runs);
     let _ = writeln!(text, "pager_smoke_successes {}", pager.smoke_successes);
+    text
+}
+
+fn render_block() -> String {
+    let mut text = String::new();
+    let summary = block::summary();
+    let stats = block::stats();
+
+    let _ = writeln!(text, "initialized {}", yes_no(block::is_initialized()));
+    let _ = writeln!(text, "device_count {}", summary.device_count);
+    let _ = writeln!(text, "partition_count {}", summary.partition_count);
+    let _ = writeln!(text, "total_bytes {}", summary.total_bytes);
+    let _ = writeln!(text, "mbr_devices {}", summary.mbr_device_count);
+    let _ = writeln!(text, "read_requests {}", stats.read_requests);
+    let _ = writeln!(text, "read_sectors {}", stats.read_sectors);
+    let _ = writeln!(text, "read_bytes {}", stats.read_bytes);
+    let _ = writeln!(text, "read_failures {}", stats.read_failures);
+
+    let mut index = 0usize;
+    while index < block::device_count() {
+        if let Some(device) = block::device(index) {
+            let _ = writeln!(
+                text,
+                "device{} id={} name={} kind={} ro={} sectors={} sector-bytes={} size={}",
+                index,
+                device.id,
+                device.name,
+                device.kind.as_str(),
+                yes_no(device.read_only),
+                device.sector_count,
+                device.sector_size,
+                device.size_bytes,
+            );
+        }
+        index += 1;
+    }
+
+    let mut part_index = 0usize;
+    while part_index < block::partition_count() {
+        if let Some(partition) = block::partition(part_index) {
+            let _ = writeln!(
+                text,
+                "partition{} id={} dev={} mbr-index={} type={:#04x} bootable={} lba={} sectors={}",
+                part_index,
+                partition.id,
+                partition.device_id,
+                partition.mbr_index,
+                partition.partition_type,
+                yes_no(partition.bootable),
+                partition.start_lba,
+                partition.sector_count,
+            );
+        }
+        part_index += 1;
+    }
+
     text
 }
 

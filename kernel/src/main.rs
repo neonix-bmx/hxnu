@@ -7,6 +7,7 @@ extern crate alloc;
 
 mod acpi;
 mod arch;
+mod block;
 mod devfs;
 mod exec;
 mod fb;
@@ -609,6 +610,24 @@ pub extern "C" fn _start() -> ! {
             "HXNU: initrd offline reason={}",
             error.as_str()
         ),
+    }
+    match block::initialize() {
+        Ok(summary) => kprintln_style!(
+            crate::tty::ConsoleStyle::Success,
+            "HXNU: block online devices={} partitions={} total-bytes={} mbr-devices={}",
+            summary.device_count,
+            summary.partition_count,
+            summary.total_bytes,
+            summary.mbr_device_count,
+        ),
+        Err(error) => {
+            kprintln_style!(
+                crate::tty::ConsoleStyle::Error,
+                "HXNU: block offline reason={}",
+                error.as_str()
+            );
+            halt();
+        }
     }
     match vfs::initialize() {
         Ok(summary) => kprintln_style!(
