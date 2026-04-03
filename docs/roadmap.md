@@ -68,6 +68,7 @@ Current status:
 - SXRC-derived memory compression integration contract is documented in `docs/sxrc-derivative-plan.md`
 - `tools/sxrc-profile-gen` host-side skeleton and generated kernel profile artifact (`kernel/src/mm/compress/profile_generated.rs`) are online
 - `mm/compress` backend trait contract and `NullBackend` bootstrap runtime facade are online on `x86_64`
+- `mm/compress` bounded header/checksum codec path with `Zero/Same/Raw` classes and deterministic `Raw` fallback is online on `x86_64`
 - Open-file table ownership is now process-scoped, and `exit_group` purges owned descriptors
 - `exit_group` now tears down the current thread-group and advances to the next runnable scheduler entry
 - Ghost and HXNU-native parent-process identity calls are online (`getppid` / `process_parent`)

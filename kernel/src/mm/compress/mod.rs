@@ -2,32 +2,70 @@
 
 use core::cell::UnsafeCell;
 
+mod checksum;
+mod codec;
+mod header;
 mod profile_generated;
 
 pub const PAGE_BYTES: usize = profile_generated::HXNU_SXRC_PAGE_SIZE;
 const _PAGE_SIZE_MATCH: [(); PAGE_BYTES] = [(); crate::mm::frame::PAGE_SIZE as usize];
+pub const MAX_ENCODED_PAGE_BYTES: usize = header::HEADER_BYTES + PAGE_BYTES;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum CompressionClass {
-    Zero,
-    Same,
-    Sxrc,
-    Raw,
+    Zero = 0,
+    Same = 1,
+    Sxrc = 2,
+    Raw = 3,
+}
+
+impl CompressionClass {
+    const fn id(self) -> u8 {
+        self as u8
+    }
+
+    fn from_id(id: u8) -> Result<Self, CompressionError> {
+        match id {
+            0 => Ok(Self::Zero),
+            1 => Ok(Self::Same),
+            2 => Ok(Self::Sxrc),
+            3 => Ok(Self::Raw),
+            _ => Err(CompressionError::UnsupportedClass),
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Zero => "zero",
+            Self::Same => "same",
+            Self::Sxrc => "sxrc",
+            Self::Raw => "raw",
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
 pub struct EncodedPage<'a> {
     class: CompressionClass,
-    payload: &'a [u8],
+    bytes: &'a [u8],
 }
 
 impl<'a> EncodedPage<'a> {
+    pub(crate) fn new(class: CompressionClass, bytes: &'a [u8]) -> Self {
+        Self { class, bytes }
+    }
+
     pub fn class(self) -> CompressionClass {
         self.class
     }
 
+    pub fn bytes(self) -> &'a [u8] {
+        self.bytes
+    }
+
     pub fn payload(self) -> &'a [u8] {
-        self.payload
+        self.bytes.get(header::HEADER_BYTES..).unwrap_or(&[])
     }
 }
 
@@ -35,7 +73,12 @@ impl<'a> EncodedPage<'a> {
 pub enum CompressionError {
     NotInitialized,
     OutputTooSmall,
+    TruncatedInput,
+    InvalidHeaderMagic,
+    UnsupportedHeaderVersion,
     InvalidPayloadLength,
+    InvalidDecodedLength,
+    ChecksumMismatch,
     UnsupportedClass,
 }
 
@@ -44,8 +87,13 @@ impl CompressionError {
         match self {
             Self::NotInitialized => "compression runtime is not initialized",
             Self::OutputTooSmall => "encode output buffer is too small",
+            Self::TruncatedInput => "encoded page buffer is truncated",
+            Self::InvalidHeaderMagic => "encoded page header magic is invalid",
+            Self::UnsupportedHeaderVersion => "encoded page header version is unsupported",
             Self::InvalidPayloadLength => "encoded payload length is invalid",
-            Self::UnsupportedClass => "compression class is not supported by active backend",
+            Self::InvalidDecodedLength => "encoded decoded-length field is invalid",
+            Self::ChecksumMismatch => "encoded payload checksum mismatch",
+            Self::UnsupportedClass => "compression class is unsupported by active backend",
         }
     }
 }
@@ -91,6 +139,8 @@ pub struct CompressionRuntimeSummary {
     pub dynamic_patterns: bool,
     pub static_dictionary_entries: usize,
     pub static_pattern_entries: usize,
+    pub encoded_header_bytes: usize,
+    pub max_encoded_page_bytes: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -126,6 +176,24 @@ impl NullBackend {
             },
         }
     }
+
+    fn account_encoded_class(&mut self, class: CompressionClass) {
+        match class {
+            CompressionClass::Zero => {
+                self.stats.zero_pages = self.stats.zero_pages.saturating_add(1);
+            }
+            CompressionClass::Same => {
+                self.stats.same_pages = self.stats.same_pages.saturating_add(1);
+            }
+            CompressionClass::Sxrc => {
+                self.stats.sxrc_pages = self.stats.sxrc_pages.saturating_add(1);
+            }
+            CompressionClass::Raw => {
+                self.stats.raw_pages = self.stats.raw_pages.saturating_add(1);
+                self.stats.fallback_raw_pages = self.stats.fallback_raw_pages.saturating_add(1);
+            }
+        }
+    }
 }
 
 impl CompressionBackend for NullBackend {
@@ -146,44 +214,18 @@ impl CompressionBackend for NullBackend {
         page: &[u8; PAGE_BYTES],
         scratch: &'a mut [u8],
     ) -> Result<EncodedPage<'a>, CompressionError> {
-        let first = page[0];
-        let is_zero = page.iter().copied().all(|byte| byte == 0);
-        let is_same = page.iter().copied().all(|byte| byte == first);
-
         self.stats.encoded_pages = self.stats.encoded_pages.saturating_add(1);
-        if is_zero {
-            self.stats.zero_pages = self.stats.zero_pages.saturating_add(1);
-            return Ok(EncodedPage {
-                class: CompressionClass::Zero,
-                payload: &scratch[..0],
-            });
-        }
 
-        if is_same {
-            if scratch.is_empty() {
-                self.stats.encode_failures = self.stats.encode_failures.saturating_add(1);
-                return Err(CompressionError::OutputTooSmall);
+        match codec::encode_page(page, scratch) {
+            Ok(encoded) => {
+                self.account_encoded_class(encoded.class());
+                Ok(encoded)
             }
-            scratch[0] = first;
-            self.stats.same_pages = self.stats.same_pages.saturating_add(1);
-            return Ok(EncodedPage {
-                class: CompressionClass::Same,
-                payload: &scratch[..1],
-            });
+            Err(error) => {
+                self.stats.encode_failures = self.stats.encode_failures.saturating_add(1);
+                Err(error)
+            }
         }
-
-        if scratch.len() < PAGE_BYTES {
-            self.stats.encode_failures = self.stats.encode_failures.saturating_add(1);
-            return Err(CompressionError::OutputTooSmall);
-        }
-
-        scratch[..PAGE_BYTES].copy_from_slice(page);
-        self.stats.raw_pages = self.stats.raw_pages.saturating_add(1);
-        self.stats.fallback_raw_pages = self.stats.fallback_raw_pages.saturating_add(1);
-        Ok(EncodedPage {
-            class: CompressionClass::Raw,
-            payload: &scratch[..PAGE_BYTES],
-        })
     }
 
     fn decode_page(
@@ -191,36 +233,16 @@ impl CompressionBackend for NullBackend {
         encoded: EncodedPage<'_>,
         out: &mut [u8; PAGE_BYTES],
     ) -> Result<(), CompressionError> {
-        match encoded.class {
-            CompressionClass::Zero => {
-                if !encoded.payload.is_empty() {
-                    self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
-                    return Err(CompressionError::InvalidPayloadLength);
-                }
-                out.fill(0);
+        match codec::decode_page(encoded.bytes(), out) {
+            Ok(_) => {
+                self.stats.decoded_pages = self.stats.decoded_pages.saturating_add(1);
+                Ok(())
             }
-            CompressionClass::Same => {
-                if encoded.payload.len() != 1 {
-                    self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
-                    return Err(CompressionError::InvalidPayloadLength);
-                }
-                out.fill(encoded.payload[0]);
-            }
-            CompressionClass::Raw => {
-                if encoded.payload.len() != PAGE_BYTES {
-                    self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
-                    return Err(CompressionError::InvalidPayloadLength);
-                }
-                out.copy_from_slice(encoded.payload);
-            }
-            CompressionClass::Sxrc => {
+            Err(error) => {
                 self.stats.decode_failures = self.stats.decode_failures.saturating_add(1);
-                return Err(CompressionError::UnsupportedClass);
+                Err(error)
             }
         }
-
-        self.stats.decoded_pages = self.stats.decoded_pages.saturating_add(1);
-        Ok(())
     }
 
     fn stats(&self) -> CompressionStats {
@@ -260,6 +282,8 @@ impl CompressionRuntime {
             dynamic_patterns: profile_generated::HXNU_SXRC_ENABLE_DYNAMIC_PATTERNS,
             static_dictionary_entries: profile_generated::HXNU_SXRC_STATIC_DICTIONARY.len(),
             static_pattern_entries: profile_generated::HXNU_SXRC_STATIC_PATTERNS.len(),
+            encoded_header_bytes: header::HEADER_BYTES,
+            max_encoded_page_bytes: MAX_ENCODED_PAGE_BYTES,
         }
     }
 

@@ -218,7 +218,7 @@ pub extern "C" fn _start() -> ! {
     match mm::compress::initialize() {
         Ok(summary) => {
             kprintln!(
-                "HXNU: mm compress online backend={} profile={} v{} page={} unit={} little-endian={} dynamic-patterns={} dict={} patterns={}",
+                "HXNU: mm compress online backend={} profile={} v{} page={} unit={} little-endian={} dynamic-patterns={} dict={} patterns={} header-bytes={} max-encoded={}",
                 summary.backend,
                 summary.profile,
                 summary.profile_version,
@@ -228,6 +228,8 @@ pub extern "C" fn _start() -> ! {
                 yes_no(summary.dynamic_patterns),
                 summary.static_dictionary_entries,
                 summary.static_pattern_entries,
+                summary.encoded_header_bytes,
+                summary.max_encoded_page_bytes,
             );
             let stats = mm::compress::stats();
             kprintln!(
